@@ -24,7 +24,7 @@ const clauseColors: Record<string, string> = {
 }
 
 function getClauseColor(clause: string): string {
-  if (clause.startsWith("WITH ")) return "bg-cyan-200/60 dark:bg-cyan-800/30"
+  if (clause.startsWith("WITH ") || clause.startsWith("CTE.")) return "bg-cyan-200/60 dark:bg-cyan-800/30"
   return clauseColors[clause] || "bg-yellow-200/40 dark:bg-yellow-800/30"
 }
 

@@ -2,10 +2,11 @@ package com.sqlvisualizer.backend.strategy;
 
 import com.sqlvisualizer.backend.model.QueryStepResponse.StepResult;
 import com.sqlvisualizer.backend.model.TableData;
+import net.sf.jsqlparser.expression.AnalyticExpression;
+import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.statement.select.*;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 public class CteStrategy implements StepStrategy {
     @Override
@@ -16,15 +17,143 @@ public class CteStrategy implements StepStrategy {
             String cteName = withItem.getAliasName();
             if (cteName == null) continue;
 
-            // Handle recursive CTE decomposition
             if (withItem.isRecursive()) {
                 decomposeRecursiveCTE(ctx, withItem, cteName);
                 continue;
             }
 
-            // Non-recursive CTE
-            String cteSql = ctx.getCtePrefix() + "SELECT * FROM " + cteName;
-            ctx.addStep(new StepResult("WITH " + cteName, cteSql, ctx.execute(cteSql)));
+            decomposeNonRecursiveCTE(ctx, withItem, cteName);
+        }
+    }
+
+    private void decomposeNonRecursiveCTE(StepContext ctx, WithItem<?> withItem, String cteName) {
+        ParenthesedSelect pSelect = withItem.getSelect();
+        if (pSelect == null) return;
+
+        Select body = pSelect.getSelect();
+        if (body instanceof PlainSelect ps) {
+            decomposeCTEBody(ctx, ps, cteName);
+        }
+
+        // Final CTE result
+        String cteSql = ctx.getCtePrefix() + "SELECT * FROM " + cteName;
+        ctx.addStep(new StepResult("WITH " + cteName, cteSql, ctx.execute(cteSql)));
+    }
+
+    private void decomposeCTEBody(StepContext ctx, PlainSelect ps, String cteName) {
+        boolean hasFrom = ps.getFromItem() != null;
+        boolean hasJoins = ps.getJoins() != null && !ps.getJoins().isEmpty();
+        boolean hasWhere = ps.getWhere() != null;
+        boolean hasWindowFn = detectWindowFunctions(ps);
+
+        if (!hasFrom) return;
+
+        // Save originals
+        List<SelectItem<?>> originalItems = ps.getSelectItems();
+        List<Join> originalJoins = ps.getJoins();
+        Expression originalWhere = ps.getWhere();
+
+        // Step 1: FROM — SELECT * FROM fromItem (no joins, no WHERE)
+        String fromSql = "SELECT * FROM " + ps.getFromItem();
+        String fromLabel = "CTE." + ps.getFromItem().toString();
+        ctx.addStep(new StepResult(fromLabel, fromSql, safeExecute(ctx, fixMySqlDateFunctions(fromSql))));
+
+        // Step 2: JOINs — add progressively
+        if (hasJoins) {
+            for (int i = 0; i < originalJoins.size(); i++) {
+                Join join = originalJoins.get(i);
+                String joinSql = rebuildCteStep(ps, "SELECT *", originalJoins.subList(0, i + 1), null);
+                String joinLabel = "CTE." + join.getRightItem().toString();
+                ctx.addStep(new StepResult(joinLabel, joinSql, safeExecute(ctx, fixMySqlDateFunctions(joinSql))));
+            }
+            ps.setJoins(originalJoins);
+        }
+
+        // Step 3: WHERE — filter
+        if (hasWhere) {
+            String whereSql = rebuildCteStep(ps, "SELECT *", originalJoins, originalWhere);
+            ctx.addStep(new StepResult("CTE.WHERE", whereSql, safeExecute(ctx, fixMySqlDateFunctions(whereSql))));
+        }
+
+        // Step 4: SELECT without window functions (body preview)
+        if (hasWindowFn) {
+            String bodySql = rebuildCteStep(ps, "SELECT " + selectItemsWithoutWindow(originalItems), originalJoins, originalWhere);
+            ctx.addStep(new StepResult("CTE.BODY", bodySql, safeExecute(ctx, fixMySqlDateFunctions(bodySql))));
+        }
+
+        // Step 5: Window Functions step (if any)
+        if (hasWindowFn) {
+            String windowSql = rebuildCteStep(ps, null, originalJoins, originalWhere);
+            String windowLabel = "CTE.WINDOW " + windowFnName(ps);
+            ctx.addStep(new StepResult(windowLabel, windowSql, safeExecute(ctx, fixMySqlDateFunctions(windowSql))));
+        }
+
+        // Restore originals
+        ps.setSelectItems(originalItems);
+        ps.setJoins(originalJoins);
+        ps.setWhere(originalWhere);
+    }
+
+    private String rebuildCteStep(PlainSelect ps, String selectOverride, List<Join> joinsOverride, Expression whereOverride) {
+        StringBuilder sb = new StringBuilder();
+        if (selectOverride != null) {
+            sb.append(selectOverride);
+        } else {
+            sb.append(ps.getSelectItems().toString().replaceAll("^\\[|\\]$", ""));
+            sb.insert(0, "SELECT ");
+        }
+        if (ps.getFromItem() != null) sb.append(" FROM ").append(ps.getFromItem());
+        if (joinsOverride != null && !joinsOverride.isEmpty()) {
+            for (Join j : joinsOverride) sb.append(" ").append(j);
+        } else if (ps.getJoins() != null && joinsOverride == null) {
+            for (Join j : ps.getJoins()) sb.append(" ").append(j);
+        }
+        if (whereOverride != null) sb.append(" WHERE ").append(whereOverride);
+        else if (ps.getWhere() != null && whereOverride == null) sb.append(" WHERE ").append(ps.getWhere());
+        return sb.toString();
+    }
+
+    private String selectItemsWithoutWindow(List<SelectItem<?>> items) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) sb.append(", ");
+            Expression e = items.get(i).getExpression();
+            if (e instanceof AnalyticExpression) {
+                // Use expression inside window fn as plain column
+                Expression inner = ((AnalyticExpression) e).getExpression();
+                sb.append(inner != null ? inner.toString() : "1");
+            } else {
+                sb.append(e);
+            }
+        }
+        return sb.toString();
+    }
+
+    private boolean detectWindowFunctions(PlainSelect ps) {
+        if (ps.getSelectItems() == null) return false;
+        return ps.getSelectItems().stream()
+            .anyMatch(item -> item.getExpression() instanceof AnalyticExpression);
+    }
+
+    private String windowFnName(PlainSelect ps) {
+        for (SelectItem<?> item : ps.getSelectItems()) {
+            if (item.getExpression() instanceof AnalyticExpression analytic) {
+                return analytic.getName();
+            }
+        }
+        return "WINDOW";
+    }
+
+    private String fixMySqlDateFunctions(String sql) {
+        return sql.replaceAll("(?i)DATEDIFF\\s*\\(\\s*(?!(?:'|\"|DAY|MONTH|YEAR|HOUR|MINUTE|SECOND|WEEK|QUARTER))", "DATEDIFF('DAY', ");
+    }
+
+    private TableData safeExecute(StepContext ctx, String sql) {
+        try {
+            return ctx.execute(sql);
+        } catch (Exception e) {
+            return new TableData(List.of("info"),
+                List.of(Map.of("info", "Step failed: " + e.getMessage())));
         }
     }
 
@@ -34,7 +163,6 @@ public class CteStrategy implements StepStrategy {
 
         Select body = pSelect.getSelectBody();
         if (!(body instanceof SetOperationList setOps)) {
-            // Single SELECT recursive CTE — show as regular WITH
             String cteSql = ctx.getCtePrefix() + "SELECT * FROM " + cteName;
             ctx.addStep(new StepResult("WITH " + cteName + " (recursive)", cteSql, ctx.execute(cteSql)));
             return;
@@ -43,27 +171,21 @@ public class CteStrategy implements StepStrategy {
         List<Select> selects = setOps.getSelects();
         List<SetOperation> ops = setOps.getOperations();
 
-        // Extract anchor (non-recursive) SELECT — usually the first one before UNION ALL
         Select anchorSelect = selects.getFirst();
         String anchorSql = anchorSelect.toString();
 
-        // Execute anchor and show as initial CTE step
-        String anchorWith = withItem.toString().replaceFirst("(?i)\\bUNION\\s+ALL\\b.*$", "");
+        String queryAnchor = "WITH RECURSIVE " + cteName + " AS (" + anchorSql + ") SELECT * FROM " + cteName;
         try {
-            // Execute anchor directly
-            String queryAnchor = "WITH RECURSIVE " + cteName + " AS (" + anchorSql + ") SELECT * FROM " + cteName;
             ctx.addStep(new StepResult("CTE ANCHOR", queryAnchor, ctx.execute(queryAnchor)));
         } catch (Exception e) {
-            TableData err = new TableData(List.of("info"),
-                List.of(java.util.Map.of("info", "Anchor execution failed: " + e.getMessage())));
-            ctx.addStep(new StepResult("CTE ANCHOR", anchorSql, err));
+            ctx.addStep(new StepResult("CTE ANCHOR", anchorSql,
+                new TableData(List.of("info"),
+                    List.of(Map.of("info", "Anchor execution failed: " + e.getMessage())))));
         }
 
-        // Iterate recursive part until no new rows
         int iter = 0;
         int prevCount = -1;
-        TableData lastData = null;
-        while (iter < 100) { // safety limit
+        while (iter < 100) {
             iter++;
             String iterCte = "WITH RECURSIVE " + cteName + " AS (" + pSelect.getSelectBody().toString() + ") "
                 + "SELECT * FROM " + cteName;
@@ -73,26 +195,23 @@ public class CteStrategy implements StepStrategy {
                 if (iterData.getRows().isEmpty()) {
                     ctx.addStep(new StepResult("CTE ITER " + iter, iterCte,
                         new TableData(List.of("info"),
-                            List.of(java.util.Map.of("info", "No new rows (iteration complete)")))));
+                            List.of(Map.of("info", "No new rows (iteration complete)")))));
                     break;
                 }
                 if (curCount == prevCount) {
-                    // No new rows added — converged
                     ctx.addStep(new StepResult("CTE ITER " + iter, iterCte, iterData));
                     break;
                 }
                 ctx.addStep(new StepResult("CTE ITER " + iter, iterCte, iterData));
                 prevCount = curCount;
-                lastData = iterData;
             } catch (Exception e) {
                 ctx.addStep(new StepResult("CTE ITER " + iter, iterCte,
                     new TableData(List.of("info"),
-                        List.of(java.util.Map.of("info", "Iteration failed: " + e.getMessage())))));
+                        List.of(Map.of("info", "Iteration failed: " + e.getMessage())))));
                 break;
             }
         }
 
-        // Final CTE step
         String finalCte = ctx.getCtePrefix() + "SELECT * FROM " + cteName;
         ctx.addStep(new StepResult("WITH " + cteName, finalCte, ctx.execute(finalCte)));
     }

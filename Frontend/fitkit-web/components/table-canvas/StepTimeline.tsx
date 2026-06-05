@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { StepForward, StepBack, Play, Square } from "lucide-react"
+import { StepForward, StepBack, Play, Square, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { StepResult } from "@/lib/types"
 
@@ -52,6 +52,9 @@ export function StepTimeline({ steps, currentStep, onStepChange, isPlaying, onPl
             )}
           >
             {step.clause}
+            {step.extras?.error && (
+              <AlertCircle className="size-2.5 text-destructive ml-0.5 inline" />
+            )}
           </button>
         ))}
       </div>

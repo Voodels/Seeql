@@ -4,6 +4,25 @@ export interface TableData {
   totalRows: number
 }
 
+export interface WindowFunctionInfo {
+  name: string;
+  alias?: string;
+  expression?: string;
+  partitionBy?: string[];
+  partitionByRaw?: string;
+  orderBy?: { expression: string; direction: string; nulls?: string }[];
+  orderByRaw?: string;
+  windowFrame?: {
+    type?: string;
+    unit?: string;
+    offset?: string;
+    range?: string;
+    start?: { type?: string; offset?: string };
+    end?: { type?: string; offset?: string };
+  };
+  overall?: string;
+}
+
 export interface StepResult {
   clause: string
   sql: string
@@ -15,6 +34,16 @@ export interface StepResult {
     rightTable?: string
     leftTable?: string
     joinType?: string
+    setAssignments?: string
+    beforeData?: TableData
+    insertColumns?: string[]
+    columnDefinitions?: string[]
+    selectSql?: string
+    intoTable?: string
+    plan?: boolean
+    error?: string
+    windowFunctions?: WindowFunctionInfo[]
+    windowDefinition?: string
   }
 }
 

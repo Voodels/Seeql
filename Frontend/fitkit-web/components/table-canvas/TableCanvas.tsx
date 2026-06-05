@@ -2,11 +2,16 @@
 
 import { useState, useRef, useCallback, useEffect } from "react"
 import { StepTimeline } from "./StepTimeline"
-import { AnimatedTable } from "./AnimatedTable"
 import { GroupAnimation } from "./GroupAnimation"
 import { CteAnimation } from "./CteAnimation"
 import { DistinctAnimation } from "./DistinctAnimation"
 import { JoinAnimation } from "./JoinAnimation"
+import { WhereAnimation } from "./WhereAnimation"
+import { SelectAnimation } from "./SelectAnimation"
+import { OrderByAnimation } from "./OrderByAnimation"
+import { LimitAnimation } from "./LimitAnimation"
+import { TransitionAnimation } from "./TransitionAnimation"
+import { AlertCircle } from "lucide-react"
 import { getClauseBadgeColor } from "@/lib/animation-utils"
 import type { StepResult, TableData } from "@/lib/types"
 
@@ -19,7 +24,7 @@ interface TableCanvasProps {
 export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableCanvasProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [groupAnimComplete, setGroupAnimComplete] = useState(false)
+  const [animComplete, setAnimComplete] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const step = steps[currentStep]
@@ -27,9 +32,14 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
   const previousData = currentStep > 0 ? steps[currentStep - 1]?.data : undefined
 
   const isGroupStep = step?.clause === "GROUP BY" && !!step?.groupColumns?.length
-  const isCteStep = step?.clause?.startsWith("WITH ") ?? false
+  const isCteStep = !!(step?.clause?.startsWith("WITH ") || step?.clause?.startsWith("CTE.WINDOW"))
   const isDistinctStep = step?.clause === "DISTINCT"
-  const isJoinStep = step?.clause?.includes("JOIN ") ?? false
+  const isJoinStep = !!(step?.clause?.includes("JOIN ") || (step?.clause?.startsWith("CTE.") && !step?.clause?.startsWith("CTE.BODY") && !step?.clause?.startsWith("CTE.WHERE") && !step?.clause?.startsWith("CTE.WINDOW") && step?.sql?.includes(" JOIN ")))
+  const isWhereStep = step?.clause === "WHERE" || step?.clause === "CTE.WHERE" || step?.clause === "HAVING"
+  const isSelectStep = step?.clause === "SELECT" || step?.clause === "CTE.BODY"
+  const isOrderByStep = step?.clause === "ORDER BY" || step?.clause?.startsWith("ORDER BY")
+  const isLimitStep = step?.clause === "LIMIT"
+  const hasAnimation = isGroupStep || isCteStep || isDistinctStep || isJoinStep || isWhereStep || isSelectStep || isOrderByStep || isLimitStep
 
   useEffect(() => {
     if (step && onActiveClauseChange) onActiveClauseChange(step.clause)
@@ -38,11 +48,11 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
   useEffect(() => {
     setCurrentStep(0)
     setIsPlaying(false)
-    setGroupAnimComplete(false)
+    setAnimComplete(false)
   }, [steps.length])
 
   const goToStep = useCallback((index: number) => {
-    setGroupAnimComplete(false)
+    setAnimComplete(false)
     setCurrentStep(Math.max(0, Math.min(index, steps.length - 1)))
   }, [steps.length])
 
@@ -55,28 +65,27 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
       setIsPlaying(false)
       return
     }
-    if ((isGroupStep || isCteStep || isDistinctStep || isJoinStep) && !groupAnimComplete) {
+    if (hasAnimation && !animComplete) {
       if (timerRef.current) clearTimeout(timerRef.current)
       return
     }
     timerRef.current = setTimeout(() => {
       setCurrentStep((prev) => prev + 1)
-      setGroupAnimComplete(false)
+      setAnimComplete(false)
     }, 1200)
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [isPlaying, currentStep, steps.length, isGroupStep, isCteStep, groupAnimComplete])
+  }, [isPlaying, currentStep, steps.length, hasAnimation, animComplete])
 
   const togglePlay = useCallback(() => {
     if (currentStep >= steps.length - 1) setCurrentStep(0)
     setIsPlaying((prev) => !prev)
   }, [currentStep, steps.length])
 
-  const handleGroupComplete = useCallback(() => {
-    setGroupAnimComplete(true)
-    // When not in auto-play, advance immediately
+  const handleAnimComplete = useCallback(() => {
+    setAnimComplete(true)
     if (!isPlaying && currentStep < steps.length - 1) {
       setCurrentStep((prev) => prev + 1)
-      setGroupAnimComplete(false)
+      setAnimComplete(false)
     }
   }, [isPlaying, currentStep, steps.length])
 
@@ -116,7 +125,7 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
             key={step.clause}
             previousData={previousData}
             step={step}
-            onComplete={handleGroupComplete}
+            onComplete={handleAnimComplete}
           />
         ) : isCteStep && previousData ? (
           <CteAnimation
@@ -125,30 +134,70 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
             currentData={data}
             cteName={step.clause.replace("WITH ", "")}
             cteSql={step.sql}
-            onComplete={handleGroupComplete}
+            onComplete={handleAnimComplete}
           />
         ) : isDistinctStep && previousData ? (
           <DistinctAnimation
             key={step.clause}
             previousData={previousData}
             currentData={data}
-            onComplete={handleGroupComplete}
+            onComplete={handleAnimComplete}
           />
         ) : isJoinStep && previousData ? (
           <JoinAnimation
             key={step.clause}
             previousData={previousData}
             step={step}
-            onComplete={handleGroupComplete}
+            onComplete={handleAnimComplete}
           />
-        ) : (
+        ) : isWhereStep && previousData ? (
+          <WhereAnimation
+            key={step.clause}
+            previousData={previousData}
+            step={step}
+            onComplete={handleAnimComplete}
+          />
+        ) : isSelectStep && previousData ? (
+          <SelectAnimation
+            key={step.clause}
+            previousData={previousData}
+            step={step}
+            onComplete={handleAnimComplete}
+          />
+        ) : isOrderByStep && previousData ? (
+          <OrderByAnimation
+            key={step.clause}
+            previousData={previousData}
+            step={step}
+            onComplete={handleAnimComplete}
+          />
+        ) : isLimitStep && previousData ? (
+          <LimitAnimation
+            key={step.clause}
+            previousData={previousData}
+            step={step}
+            onComplete={handleAnimComplete}
+          />
+        ) : step?.extras?.error ? (
           <div className="p-4">
-            <AnimatedTable
-              data={data}
-              previousData={previousData}
-              clause={step?.clause}
-            />
+            <div className="flex items-start gap-3 p-4 rounded-lg border border-destructive/30 bg-destructive/5">
+              <AlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-destructive">Error</p>
+                <p className="text-xs text-muted-foreground mt-1">{step.extras.error}</p>
+                <code className="text-[10px] block mt-2 font-mono bg-muted p-2 rounded text-muted-foreground">
+                  {step.sql}
+                </code>
+              </div>
+            </div>
           </div>
+        ) : (
+          <TransitionAnimation
+            key={step.clause}
+            previousData={previousData}
+            step={step}
+            onComplete={handleAnimComplete}
+          />
         )}
       </div>
     </div>

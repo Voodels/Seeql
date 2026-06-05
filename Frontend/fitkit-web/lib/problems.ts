@@ -43,7 +43,7 @@ export const PROBLEMS: Problem[] = [
     description: "Find ids of records where temperature was higher than the previous day.",
     ddl: "CREATE TABLE Weather (id INT PRIMARY KEY, recordDate DATE, temperature INT)",
     dml: "INSERT INTO Weather VALUES\n  (1, '2015-01-01', 10),\n  (2, '2015-01-02', 25),\n  (3, '2015-01-03', 20),\n  (4, '2015-01-04', 30)",
-    solution: "SELECT w1.id FROM Weather w1 JOIN Weather w2 ON DATEDIFF(w1.recordDate, w2.recordDate) = 1 WHERE w1.temperature > w2.temperature",
+    solution: "SELECT w1.id FROM Weather w1 JOIN Weather w2 ON DATEDIFF('DAY', w1.recordDate, w2.recordDate) = 1 WHERE w1.temperature > w2.temperature",
   },
   {
     id: "620",

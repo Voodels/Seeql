@@ -2,3 +2,6 @@ springboot.zip
 *.log
 *.class
 net/
+TestExplain.java
+TestStmts.java
+leetcode-scraper/

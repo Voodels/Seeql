@@ -195,11 +195,15 @@ graph TB
 
     subgraph Animations["components/table-canvas/"]
         ST["StepTimeline<br/>Step progression bar"]
-        AT["AnimatedTable<br/>Generic table renderer<br/>+ WHERE/HAVING/LIMIT diff mode"]
         GA["GroupAnimation<br/>5-phase bucket flying<br/>Rows → Assign → Buckets → Collapse → Result"]
         CA["CteAnimation<br/>4-phase partition<br/>Input → Partition → Compute → Result"]
         DA["DistinctAnimation<br/>4-phase dedup<br/>Rows → Mark → Remove → Result"]
         JA["JoinAnimation<br/>4-phase join<br/>Left → Right → Matching → Result<br/>(INNER/LEFT/RIGHT/CROSS/LATERAL)"]
+        WA["WhereAnimation<br/>4-phase filter<br/>Evaluate → PASS/FAIL buckets → Result"]
+        SA["SelectAnimation<br/>4-phase projection<br/>Columns → KEPT/DROPPED buckets → Result"]
+        OA["OrderByAnimation<br/>4-phase sort<br/>Unsorted → Sorting → Sorted ranks → Result"]
+        LA["LimitAnimation<br/>4-phase cutoff<br/>All → Cutoff → Remove → Result"]
+        TA["TransitionAnimation<br/>3-phase generic<br/>Before → Appearing → Result"]
     end
 
     subgraph Shared["lib/"]
@@ -211,11 +215,15 @@ graph TB
     end
 
     TC --> ST
-    TC --> AT
     TC --> GA
     TC --> CA
     TC --> DA
     TC --> JA
+    TC --> WA
+    TC --> SA
+    TC --> OA
+    TC --> LA
+    TC --> TA
     TC --> T
     TC --> AU
     GA --> AU
@@ -226,6 +234,16 @@ graph TB
     DA --> PU
     JA --> AU
     JA --> PU
+    WA --> AU
+    WA --> PU
+    SA --> AU
+    SA --> PU
+    OA --> AU
+    OA --> PU
+    LA --> AU
+    LA --> PU
+    TA --> AU
+    TA --> PU
     SE --> CH
 ```
 
@@ -234,11 +252,15 @@ graph TB
 ```mermaid
 flowchart LR
     A["Step from API"] --> B{"clause?"}
-    B -->|"GROUP BY + has groupColumns"| GA["GroupAnimation"]
-    B -->|"starts WITH " or "starts CTE "| CA["CteAnimation"]
-    B -->|"DISTINCT"| DA["DistinctAnimation"]
-    B -->|"includes JOIN "| JA["JoinAnimation<br/>(INNER/LEFT/RIGHT/CROSS/LATERAL)"]
-    B -->|"else"| AT["AnimatedTable<br/>(diff mode if WHERE/HAVING/LIMIT)"]
+    B -->|"GROUP BY + has groupColumns"| GA["GroupAnimation<br/>5 phases"]
+    B -->|"starts WITH " or "starts CTE "| CA["CteAnimation<br/>4 phases"]
+    B -->|"DISTINCT"| DA["DistinctAnimation<br/>4 phases"]
+    B -->|"includes JOIN "| JA["JoinAnimation<br/>4 phases"]
+    B -->|"WHERE / HAVING / CTE.WHERE"| WA["WhereAnimation<br/>4 phases<br/>(pass/fail buckets)"]
+    B -->|"SELECT / CTE.BODY"| SA["SelectAnimation<br/>4 phases<br/>(keep/drop column buckets)"]
+    B -->|"ORDER BY"| OA["OrderByAnimation<br/>4 phases<br/>(staggered sort)"]
+    B -->|"LIMIT"| LA["LimitAnimation<br/>4 phases<br/>(cutoff line)"]
+    B -->|"else"| TA["TransitionAnimation<br/>3 phases<br/>(fallback for 10+ types)"]
 ```
 
 ---
@@ -352,11 +374,15 @@ Seeql/
 │   │   ├── table-canvas/
 │   │   │   ├── TableCanvas.tsx             # animation router
 │   │   │   ├── StepTimeline.tsx
-│   │   │   ├── AnimatedTable.tsx           # diff mode for WHERE/HAVING/LIMIT
-│   │   │   ├── GroupAnimation.tsx          # 5-phase
-│   │   │   ├── CteAnimation.tsx            # 4-phase
-│   │   │   ├── DistinctAnimation.tsx       # 4-phase
-│   │   │   └── JoinAnimation.tsx           # 4-phase (INNER/LEFT/RIGHT/CROSS)
+│   │   │   ├── GroupAnimation.tsx          # 5-phase GROUP BY
+│   │   │   ├── CteAnimation.tsx            # 4-phase WITH / window
+│   │   │   ├── DistinctAnimation.tsx       # 4-phase DISTINCT
+│   │   │   ├── JoinAnimation.tsx           # 4-phase JOIN
+│   │   │   ├── WhereAnimation.tsx          # 4-phase WHERE/HAVING
+│   │   │   ├── SelectAnimation.tsx         # 4-phase SELECT projection
+│   │   │   ├── OrderByAnimation.tsx        # 4-phase ORDER BY sort
+│   │   │   ├── LimitAnimation.tsx          # 4-phase LIMIT cutoff
+│   │   │   └── TransitionAnimation.tsx     # 3-phase fallback
 │   │   └── ui/                             # shadcn components
 │   ├── hooks/
 │   │   └── use-phase-stepper.ts
@@ -397,5 +423,33 @@ Seeql/
 - **Compound statements**: Auto-split via `CCJSqlParserUtil.parseStatements()`. Each statement executed independently, step clauses prefixed with `#1`, `#2`, etc.
 - **Set operations**: `SetOperationList` (UNION/INTERSECT/EXCEPT) — each `SELECT` executed independently, then combined in final step.
 - **CTE-body exclusion**: Clause-highlighter skips standard SQL keywords inside CTE body parentheses — only main-query clauses are highlighted.
+- **Dedicated step animations**: Every clause type gets a multi-phase animation — GroupAnimation (5-phase bucket flying), WhereAnimation (4-phase pass/fail buckets), SelectAnimation (4-phase column keep/drop buckets), OrderByAnimation (4-phase staggered sort), LimitAnimation (4-phase cutoff line), CteAnimation (4-phase partition), DistinctAnimation (4-phase dedup), JoinAnimation (4-phase matching bridge), and TransitionAnimation (3-phase generic fallback for FROM/BEFORE/INSERT/UPDATE/DELETE/VALUES/SUBQUERY/etc.).
 - **Shared animation primitives**: `rowKey`, `GROUP_COLORS`, `CLAUSE_BADGE_COLORS`, `getGroupColor`, `isGroupStep` are shared across all animation components.
 - **usePhaseStepper**: Custom hook provides prev/next/play/toggle with inline phaseIdx clamp (no crashes when phases array length changes).
+
+---
+
+## Suggested Optimizations
+
+### Performance & UX
+
+| Area | Suggestion | Impact |
+|------|-----------|--------|
+| **Animation pacing** | Scale row stagger inversely with row count: `Math.min(0.04, 1.5 / rowCount)`. Current fixed 0.02-0.06s per row means 30s+ animation for 500 rows. | High — large tables become unusable |
+| **Transition descriptions** | Add text overlays ("Loading FROM...", "Applying CTE anchor...") to the generic 3-phase fallback so users understand what invisible steps are doing. | Medium — improves learnability |
+| **Speed slider** | Add a 0.5× / 1× / 2× / 5× multiplier on `phaseInterval` so users control pacing at runtime. | Low — nice-to-have |
+
+### Code Quality
+
+| Area | Suggestion | Impact |
+|------|-----------|--------|
+| **`getAnimationType()` utility** | Extract the 50-line inline switch in `TableCanvas.renderStepContent()` to a standalone function in `animation-utils.ts`. Makes testing possible and reduces component noise. | Medium — maintainability |
+| **`AnimatedTable.tsx`** | File is no longer imported anywhere. Can be deleted to remove dead code. | Low — cleanup |
+| **CTE SQL reconstruction** | `CteStrategy.decomposeCTEBody()` builds step SQL via string concatenation which can miss edge cases. Use `StatementDeParser.toString()` for robust SQL generation. | Medium — correctness |
+
+### Architecture
+
+| Area | Suggestion | Impact |
+|------|-----------|--------|
+| **Parallel subqueries** | WHERE-clause subqueries are independent. Use `CompletableFuture.allOf()` to execute them concurrently. | Medium — speedup on complex queries |
+| **Backend error fields** | Add optional `error` / `errorType` fields to `StepResult` so the frontend can distinguish data issues from parsing failures. | Low — debuggability |

@@ -4,15 +4,14 @@ import com.sqlvisualizer.backend.model.QueryStepResponse.StepResult;
 import com.sqlvisualizer.backend.model.TableData;
 import net.sf.jsqlparser.expression.AnalyticExpression;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.statement.select.OrderByElement;
 import net.sf.jsqlparser.expression.WindowDefinition;
 import net.sf.jsqlparser.expression.WindowElement;
+import net.sf.jsqlparser.expression.WindowRange;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.SelectItem;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class SelectStrategy implements StepStrategy {
     @Override
@@ -22,13 +21,10 @@ public class SelectStrategy implements StepStrategy {
 
         String selectSql = ctx.rebuildSelectSql(false, false);
 
-        // Detect window functions in SELECT items
         Map<String, Object> extras = detectWindowFunctions(ps);
 
         if (hasDistinct) {
-            String sqlNoDistinct = ps.getDistinct() != null
-                ? selectSql.replaceFirst("(?i)\\bSELECT\\s+DISTINCT\\b", "SELECT")
-                : selectSql;
+            String sqlNoDistinct = selectSql.replaceFirst("(?i)\\bSELECT\\s+DISTINCT\\b", "SELECT");
             ctx.addStep(new StepResult("SELECT", sqlNoDistinct, ctx.execute(sqlNoDistinct), null, extras));
             ctx.addStep(new StepResult("DISTINCT", selectSql, ctx.execute(selectSql)));
         } else {
@@ -45,17 +41,45 @@ public class SelectStrategy implements StepStrategy {
                 if (expr instanceof AnalyticExpression analytic) {
                     Map<String, Object> info = new HashMap<>();
                     info.put("name", analytic.getName());
+                    info.put("alias", item.getAlias() != null ? item.getAlias() : null);
                     info.put("expression", analytic.getExpression() != null ? analytic.getExpression().toString() : null);
-                    info.put("partitionBy", analytic.getPartitionExpressionList() != null
-                        ? analytic.getPartitionExpressionList().toString() : null);
-                    info.put("orderBy", analytic.getOrderByElements() != null
-                        ? analytic.getOrderByElements().toString() : null);
 
+                    // Partition by
+                    if (analytic.getPartitionExpressionList() != null) {
+                        List<String> partitions = new ArrayList<>();
+                        for (Expression e : analytic.getPartitionExpressionList().getExpressions()) {
+                            partitions.add(e.toString());
+                        }
+                        info.put("partitionBy", partitions);
+                        info.put("partitionByRaw", analytic.getPartitionExpressionList().toString());
+                    } else {
+                        info.put("partitionBy", List.of());
+                    }
+
+                    // Order by
+                    if (analytic.getOrderByElements() != null) {
+                        List<Map<String, Object>> orderItems = new ArrayList<>();
+                        for (OrderByElement obe : analytic.getOrderByElements()) {
+                            Map<String, Object> obInfo = new HashMap<>();
+                            obInfo.put("expression", obe.getExpression().toString());
+                            obInfo.put("direction", obe.isAsc() ? "ASC" : "DESC");
+                            if (obe.getNullOrdering() != null) {
+                                obInfo.put("nulls", obe.getNullOrdering().toString());
+                            }
+                            orderItems.add(obInfo);
+                        }
+                        info.put("orderBy", orderItems);
+                        info.put("orderByRaw", analytic.getOrderByElements().toString());
+                    } else {
+                        info.put("orderBy", List.of());
+                    }
+
+                    // Window frame (ROWS/RANGE BETWEEN)
                     WindowDefinition wd = analytic.getWindowDefinition();
                     if (wd != null) {
-                        Map<String, Object> frameInfo = new HashMap<>();
-                        frameInfo.put("name", wd.getWindowName());
-                        frameInfo.put("ref", wd.getWindowName() != null ? wd.getWindowName() : null);
+                        Map<String, Object> wdInfo = new HashMap<>();
+                        wdInfo.put("name", wd.getWindowName());
+                        info.put("windowDefinition", wd.toString());
                         extras.put("windowDefinition", wd.toString());
                     }
 
@@ -64,10 +88,26 @@ public class SelectStrategy implements StepStrategy {
                         Map<String, Object> frameInfo = new HashMap<>();
                         frameInfo.put("type", we.getType() != null ? we.getType().toString() : null);
                         frameInfo.put("offset", we.getOffset() != null ? we.getOffset().toString() : null);
-                        frameInfo.put("range", we.getRange() != null ? we.getRange().toString() : null);
+                        if (we.getRange() != null) {
+                            WindowRange range = we.getRange();
+                            frameInfo.put("range", range.toString());
+                            if (range.getStart() != null) {
+                                Map<String, Object> start = new HashMap<>();
+                                start.put("type", range.getStart().getType() != null ? range.getStart().getType().toString() : null);
+                                start.put("offset", range.getStart().getExpression() != null ? range.getStart().getExpression().toString() : null);
+                                frameInfo.put("start", start);
+                            }
+                            if (range.getEnd() != null) {
+                                Map<String, Object> end = new HashMap<>();
+                                end.put("type", range.getEnd().getType() != null ? range.getEnd().getType().toString() : null);
+                                end.put("offset", range.getEnd().getExpression() != null ? range.getEnd().getExpression().toString() : null);
+                                frameInfo.put("end", end);
+                            }
+                        }
                         info.put("windowFrame", frameInfo);
                     }
 
+                    info.put("overall", analytic.toString());
                     windowFns.add(info);
                 }
             }

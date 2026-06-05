@@ -6,9 +6,12 @@ import { TableCanvas } from "@/components/table-canvas/TableCanvas"
 import { DataPanel } from "@/components/data-panel/DataPanel"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
 import { executeQuery, setupDataset } from "@/lib/api"
 import { PROBLEMS } from "@/lib/problems"
 import type { StepResult, TableData } from "@/lib/types"
+import { useTheme } from "@/hooks/use-theme"
+import { Play, History, Sun, Moon } from "lucide-react"
 
 const difficultyStyles: Record<string, string> = {
   Easy: "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800",
@@ -16,24 +19,79 @@ const difficultyStyles: Record<string, string> = {
   Hard: "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
 }
 
+const STORAGE_KEY = "sql-history"
+const MAX_HISTORY = 50
+
 export default function Home() {
-  const [sql, setSql] = useState(PROBLEMS[9].solution)
+  const { dark, toggle: toggleTheme } = useTheme()
+  const [sql, setSql] = useState("")
   const [steps, setSteps] = useState<StepResult[]>([])
   const [finalResult, setFinalResult] = useState<TableData | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dbReady, setDbReady] = useState(false)
   const [activeClause, setActiveClause] = useState<string>("")
-  const [ddl, setDdl] = useState(PROBLEMS[9].ddl)
-  const [dml, setDml] = useState(PROBLEMS[9].dml)
+  const [ddl, setDdl] = useState("")
+  const [dml, setDml] = useState("")
+  const [showHistory, setShowHistory] = useState(false)
+  const [history, setHistory] = useState<string[]>([])
 
-  const problem = PROBLEMS.find((p) => p.solution === sql)
+  const initialized = useRef(false)
 
-  const handleExecute = useCallback(async () => {
+  // Load from URL params + history
+  useEffect(() => {
+    if (initialized.current) return
+    initialized.current = true
+
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      try { setHistory(JSON.parse(stored)) } catch {}
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    const queryParam = params.get("sql")
+    const problemParam = params.get("problem")
+
+    if (problemParam) {
+      const p = PROBLEMS.find((x) => x.id === problemParam)
+      if (p) loadProblem(p)
+      return
+    }
+
+    if (queryParam) {
+      setSql(queryParam)
+      return
+    }
+
+    // Default: first problem
+    loadProblem(PROBLEMS[0])
+  }, [])
+
+  const addToHistory = useCallback((query: string) => {
+    setHistory((prev) => {
+      const next = [query, ...prev.filter((s) => s !== query)].slice(0, MAX_HISTORY)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  const updateUrl = useCallback((newSql: string, problemId?: string) => {
+    const params = new URLSearchParams()
+    if (problemId) {
+      params.set("problem", problemId)
+    } else if (newSql) {
+      params.set("sql", newSql)
+    }
+    const url = params.toString() ? `?${params.toString()}` : "/"
+    window.history.replaceState({}, "", url)
+  }, [])
+
+  const execute = useCallback(async (query: string) => {
     setIsLoading(true)
     setError(null)
+    addToHistory(query)
     try {
-      const res = await executeQuery(sql, true)
+      const res = await executeQuery(query, true)
       setSteps(res.steps)
       setFinalResult(res.finalResult)
     } catch (err) {
@@ -41,23 +99,30 @@ export default function Home() {
     } finally {
       setIsLoading(false)
     }
-  }, [sql])
+  }, [addToHistory])
+
+  const handleExecute = useCallback(async () => {
+    console.log("[Page] handleExecute:", sql)
+    await execute(sql)
+    updateUrl(sql)
+  }, [sql, execute, updateUrl])
 
   const handleSetup = useCallback(async (ddlSql: string, dmlSql: string) => {
     setError(null)
     try {
+      console.log("[Page] Manual dataset setup: DDL then DML")
       await setupDataset(ddlSql)
       await setupDataset(dmlSql)
       setDbReady(true)
+      console.log("[Page] Dataset setup complete")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Setup failed")
+      const msg = err instanceof Error ? err.message : "Setup failed"
+      console.error("[Page] Dataset setup error:", msg, err)
+      setError(msg)
     }
   }, [])
 
-  const handleProblemSelect = useCallback(async (problemId: string) => {
-    const p = PROBLEMS.find((x) => x.id === problemId)
-    if (!p) return
-
+  const loadProblem = useCallback(async (p: typeof PROBLEMS[0]) => {
     setDdl(p.ddl)
     setDml(p.dml)
     setSql(p.solution)
@@ -68,19 +133,45 @@ export default function Home() {
     setError(null)
 
     setIsLoading(true)
+    console.log("[Page] Loading problem:", p.id, p.title)
     try {
+      console.log("[Page] Running DDL...")
       await setupDataset(p.ddl)
+      console.log("[Page] DDL complete, running DML...")
       await setupDataset(p.dml)
+      console.log("[Page] DML complete, executing query...")
       setDbReady(true)
       const res = await executeQuery(p.solution, true)
+      console.log("[Page] Query complete:", res.steps?.length, "steps")
       setSteps(res.steps)
       setFinalResult(res.finalResult)
+      addToHistory(p.solution)
+      updateUrl(p.solution, p.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Setup failed")
+      const msg = err instanceof Error ? err.message : "Setup failed"
+      console.error("[Page] Error:", msg, err)
+      setError(msg)
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [addToHistory, updateUrl])
+
+  const handleProblemSelect = useCallback(async (problemId: string) => {
+    const p = PROBLEMS.find((x) => x.id === problemId)
+    if (p) await loadProblem(p)
+  }, [loadProblem])
+
+  const handleHistorySelect = useCallback(async (query: string) => {
+    setSql(query)
+    setShowHistory(false)
+    await execute(query)
+    updateUrl(query)
+  }, [execute, updateUrl])
+
+  const problem = (() => {
+    if (typeof window === "undefined") return undefined
+    return PROBLEMS.find((p) => p.solution === sql || p.id === new URLSearchParams(window.location.search).get("problem"))
+  })()
 
   return (
     <div className="flex flex-col h-screen bg-background">
@@ -93,16 +184,54 @@ export default function Home() {
             </span>
           )}
         </div>
-        {dbReady && (
-          <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-medium dark:text-emerald-400 dark:bg-emerald-950/50">
-            DB Ready
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {dbReady && (
+            <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-medium dark:text-emerald-400 dark:bg-emerald-950/50">
+              DB Ready
+            </span>
+          )}
+          <Button size="icon-xs" variant="ghost" onClick={() => setShowHistory(!showHistory)} title="History">
+            <History className="size-3.5" />
+          </Button>
+          <Button size="icon-xs" variant="ghost" onClick={toggleTheme} title={dark ? "Light mode" : "Dark mode"}>
+            {dark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+          </Button>
+        </div>
       </header>
 
+      {/* History panel */}
+      {showHistory && history.length > 0 && (
+        <div className="absolute top-10 right-4 z-50 w-80 bg-popover border rounded-lg shadow-xl p-2 max-h-60 overflow-auto">
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1">
+            Recent Queries
+          </div>
+          {history.map((q, i) => (
+            <button
+              key={i}
+              onClick={() => handleHistorySelect(q)}
+              className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-accent truncate font-mono"
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Error overlay */}
       {error && (
-        <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20 text-destructive text-xs font-medium">
-          {error}
+        <div className="flex items-start gap-3 px-4 py-3 bg-destructive/10 border-b border-destructive/20">
+          <div className="flex-1 min-w-0">
+            <p className="text-destructive text-xs font-medium">{error}</p>
+            {(error.includes("Failed to fetch") || error.includes("NetworkError") || error.includes("CORS")) && (
+              <p className="text-[10px] text-destructive/70 mt-1 leading-relaxed">
+                Check that the backend is running on port 8081 (<code className="bg-destructive/10 px-1 rounded">cd Backend/sql-visualizer-backend && mvn spring-boot:run</code>).
+                Also verify CORS config allows <code className="bg-destructive/10 px-1 rounded">http://localhost:3000</code>.
+              </p>
+            )}
+          </div>
+          <button onClick={() => setError(null)} className="text-destructive/60 hover:text-destructive text-xs shrink-0">
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -172,10 +301,10 @@ export default function Home() {
 
         {/* Right panel */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {steps.length > 0 && finalResult ? (
+          {steps.length > 0 ? (
             <TableCanvas
               steps={steps}
-              finalResult={finalResult}
+              finalResult={finalResult || steps[steps.length - 1].data}
               onActiveClauseChange={setActiveClause}
             />
           ) : (

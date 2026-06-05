@@ -67,7 +67,7 @@ export function findClauseSpans(
 
   const upper = activeClause.toUpperCase()
   const activeKeywords = clauseMap[activeClause] || (
-    upper.startsWith("WITH ") || upper.includes("JOIN ") || upper.startsWith("CTE ")
+    upper.startsWith("WITH ") || upper.includes("JOIN ") || upper.startsWith("CTE ") || upper.startsWith("CTE.")
       ? [activeClause]
       : [activeClause, activeClause.split(" ")[0]]
   )

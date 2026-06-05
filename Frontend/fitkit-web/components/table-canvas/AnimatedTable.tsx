@@ -121,9 +121,19 @@ export function AnimatedTable({ data, previousData, clause }: AnimatedTableProps
                     className="border-b"
                   >
                     <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
-                    {data.columns.map((col) => (
-                      <TableCell key={col}>{String(row[col] ?? "")}</TableCell>
-                    ))}
+                    {data.columns.map((col) => {
+                      const val = row[col]
+                      const isNull = val === null || val === undefined
+                      return (
+                        <TableCell key={col}>
+                          {isNull ? (
+                            <span className="text-rose-400 italic font-medium">NULL</span>
+                          ) : (
+                            String(val)
+                          )}
+                        </TableCell>
+                      )
+                    })}
                     <TableCell className="text-center">
                       {isGrouping ? (
                         <span className="text-[10px] text-muted-foreground">Group</span>
