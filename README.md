@@ -1,6 +1,8 @@
 # Seeql — SQL Visual Debugger
 
-Step-by-step SQL execution visualizer. Parses a SQL query, decomposes it into clause-level steps (FROM → WHERE → GROUP BY → HAVING → SELECT → DISTINCT → JOIN), executes each against H2, and animates the transformations in the browser.
+Step-by-step SQL execution visualizer. Parses a SQL query, decomposes it into clause-level steps (FROM → WHERE → GROUP BY → HAVING → SELECT → DISTINCT → JOIN → ORDER BY → LIMIT), executes each against H2, and animates the transformations in the browser.
+
+Supports CTEs (including recursive), subqueries in WHERE, set operations (UNION/INTERSECT/EXCEPT), multiple FROM items, LATERAL joins, window function annotations, compound statements, and UPDATE/DELETE decomposition.
 
 ---
 
@@ -19,8 +21,8 @@ graph TB
 
     subgraph Backend["SpringBoot (:8081)"]
         QC["QueryController<br/>POST /api/query/execute<br/>POST /api/dataset/setup"]
-        QS["QueryService<br/>Step decomposition pipeline"]
-        STR["strategy/<br/>7 Strategy classes"]
+        QS["QueryService<br/>Step decomposition pipeline<br/>+ SET ops / compound / UPDATE / DELETE"]
+        STR["strategy/<br/>9 Strategy classes"]
         MOD["Models<br/>StepResult, TableData"]
     end
 
@@ -79,6 +81,12 @@ classDiagram
     class SelectStrategy {
         +decompose()
     }
+    class OrderByStrategy {
+        +decompose()
+    }
+    class LimitStrategy {
+        +decompose()
+    }
 
     StepStrategy <|.. CteStrategy
     StepStrategy <|.. FromStrategy
@@ -87,6 +95,8 @@ classDiagram
     StepStrategy <|.. GroupByStrategy
     StepStrategy <|.. HavingStrategy
     StepStrategy <|.. SelectStrategy
+    StepStrategy <|.. OrderByStrategy
+    StepStrategy <|.. LimitStrategy
     StepContext ..> StepStrategy : used by
 ```
 
@@ -104,48 +114,69 @@ sequenceDiagram
     U->>F: Write SQL + click Execute
     F->>C: POST /api/query/execute { sql, stepMode: true }
     C->>S: executeStepwise(sql)
-    S->>S: JSQLParser.parse(sql) → Select
-    S->>S: buildCtePrefix(withItems)
-    S->>S: new StepContext(jdbc, plainSelect, ctePrefix, sql, withItems)
-    S->>P: pipeline.forEach(strategy → strategy.decompose(ctx))
+    S->>S: parseStatements / Select / Update / Delete
+    alt Compound (semicolon-separated)
+        S->>S: handleCompoundStatements → prefix #1, #2...
+    else SetOperationList (UNION / INTERSECT / EXCEPT)
+        S->>S: handleSetOperations → SELECT 1, SELECT 2, UNION...
+    else Update
+        S->>S: handleUpdate → BEFORE / WHERE / UPDATE
+    else Delete
+        S->>S: handleDelete → BEFORE / WHERE / DELETE
+    else PlainSelect
+        S->>S: new StepContext → pipeline
+        S->>P: 9 strategies decompose(ctx)
 
-    Note over P: CteStrategy
-    P->>H: SELECT * FROM baseTable
-    H-->>P: base table rows
-    P->>H: WITH ... SELECT * FROM cteName
-    H-->>P: CTE result rows
-    P->>ctx: addStep("FROM"), addStep("WITH ...")
+        Note over P: CteStrategy (incl. recursive)
+        P->>H: CTE ANCHOR / CTE ITER N / WITH name steps
+        H-->>P: CTE result rows
+        P->>ctx: addStep(...)
 
-    Note over P: FromStrategy / JoinStrategy
-    P->>H: SELECT * FROM fromItem
-    H-->>P: left table rows
-    P->>H: SELECT * FROM rightTable
-    H-->>P: right table rows
-    P->>H: SELECT * FROM left JOIN right ON ...
-    H-->>P: joined result rows
-    P->>ctx: addStep("FROM"), addStep("JOIN ...")
+        Note over P: FromStrategy
+        P->>H: SELECT * FROM fromItem
+        H-->>P: base table rows
+        P->>ctx: addStep("FROM")
 
-    Note over P: WhereStrategy
-    P->>H: SELECT * FROM t WHERE cond
-    H-->>P: filtered rows
-    P->>ctx: addStep("WHERE")
+        Note over P: JoinStrategy (INNER/LEFT/RIGHT/CROSS/LATERAL)
+        P->>H: right table / LATERAL subquery
+        H-->>P: right-side rows
+        P->>H: SELECT * FROM left JOIN right ON ...
+        H-->>P: joined result rows
+        P->>ctx: addStep("JOIN ...")
 
-    Note over P: GroupByStrategy
-    P->>H: SELECT cols... GROUP BY col
-    H-->>P: aggregated rows
-    P->>ctx: addStep("GROUP BY")
+        Note over P: WhereStrategy (incl. subqueries)
+        P->>H: SUBQUERY N → SELECT ...
+        H-->>P: subquery result rows
+        P->>H: SELECT * FROM t WHERE cond
+        H-->>P: filtered rows
+        P->>ctx: addStep("SUBQUERY ..."), addStep("WHERE")
 
-    Note over P: HavingStrategy
-    P->>H: SELECT ... HAVING cond
-    H-->>P: filtered aggregated rows
-    P->>ctx: addStep("HAVING")
+        Note over P: GroupByStrategy
+        P->>H: SELECT cols... GROUP BY col
+        H-->>P: aggregated rows
+        P->>ctx: addStep("GROUP BY")
 
-    Note over P: SelectStrategy
-    P->>H: original SQL (or without DISTINCT)
-    H-->>P: final result rows
-    P->>ctx: addStep("SELECT"), setFinalResult(...)
+        Note over P: HavingStrategy
+        P->>H: SELECT ... HAVING cond
+        H-->>P: filtered aggregated rows
+        P->>ctx: addStep("HAVING")
 
-    S-->>C: new QueryStepResponse(ctx.steps, ctx.finalResult)
+        Note over P: SelectStrategy (incl. window functions)
+        P->>H: SELECT ... (detect AnalyticExpression)
+        H-->>P: final result rows
+        P->>ctx: addStep("SELECT"), extras.windowFunctions
+
+        Note over P: OrderByStrategy
+        P->>H: ... ORDER BY cols
+        H-->>P: ordered rows
+        P->>ctx: addStep("ORDER BY"), extras.orderBy
+
+        Note over P: LimitStrategy
+        P->>H: ... LIMIT / OFFSET
+        H-->>P: limited rows
+        P->>ctx: addStep("LIMIT")
+    end
+    S-->>C: QueryStepResponse
     C-->>F: JSON response
     F->>F: TableCanvas renders active step
     F->>U: Animated visualization
@@ -156,7 +187,7 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph Layout["app/page.tsx"]
-        PS["Problem Selector<br/>11 LeetCode problems"]
+        PS["Problem Selector<br/>12 LeetCode problems"]
         SE["SqlEditor<br/>- Textarea<br/>- Clause-highlighting overlay"]
         DP["DataPanel<br/>- DDL tab<br/>- DML tab"]
         TC["TableCanvas<br/>- StepTimeline breadcrumb<br/>- Play/step controls"]
@@ -164,11 +195,11 @@ graph TB
 
     subgraph Animations["components/table-canvas/"]
         ST["StepTimeline<br/>Step progression bar"]
-        AT["AnimatedTable<br/>Generic table renderer<br/>+ WHERE/HAVING diff mode"]
+        AT["AnimatedTable<br/>Generic table renderer<br/>+ WHERE/HAVING/LIMIT diff mode"]
         GA["GroupAnimation<br/>5-phase bucket flying<br/>Rows → Assign → Buckets → Collapse → Result"]
         CA["CteAnimation<br/>4-phase partition<br/>Input → Partition → Compute → Result"]
         DA["DistinctAnimation<br/>4-phase dedup<br/>Rows → Mark → Remove → Result"]
-        JA["JoinAnimation<br/>4-phase join<br/>Left → Right → Matching → Result"]
+        JA["JoinAnimation<br/>4-phase join<br/>Left → Right → Matching → Result<br/>(INNER/LEFT/RIGHT/CROSS/LATERAL)"]
     end
 
     subgraph Shared["lib/"]
@@ -204,10 +235,10 @@ graph TB
 flowchart LR
     A["Step from API"] --> B{"clause?"}
     B -->|"GROUP BY + has groupColumns"| GA["GroupAnimation"]
-    B -->|"starts WITH "| CA["CteAnimation"]
+    B -->|"starts WITH " or "starts CTE "| CA["CteAnimation"]
     B -->|"DISTINCT"| DA["DistinctAnimation"]
-    B -->|"starts JOIN "| JA["JoinAnimation"]
-    B -->|"else"| AT["AnimatedTable<br/>(diff mode if WHERE/HAVING)"]
+    B -->|"includes JOIN "| JA["JoinAnimation<br/>(INNER/LEFT/RIGHT/CROSS/LATERAL)"]
+    B -->|"else"| AT["AnimatedTable<br/>(diff mode if WHERE/HAVING/LIMIT)"]
 ```
 
 ---
@@ -219,7 +250,7 @@ flowchart LR
 | `/api/query/execute` | POST | `{ sql, stepMode }` | `{ steps: StepResult[], finalResult: TableData }` |
 | `/api/dataset/setup` | POST | `{ sql }` | `{ status: "ok" }` |
 
-### StepResult
+### StepResult (SELECT query)
 
 ```json
 {
@@ -234,6 +265,49 @@ flowchart LR
     "leftTable": "Stadium s",
     "joinType": "INNER"
   }
+}
+```
+
+### StepResult (UPDATE)
+
+```json
+{
+  "clause": "UPDATE",
+  "sql": "UPDATE products SET price = 15 WHERE id = 1",
+  "data": { "columns": ["ID","NAME","PRICE"], "rows": [...], "totalRows": 3 },
+  "extras": {
+    "setAssignments": "price = 15",
+    "beforeData": { "columns": [...], "rows": [...], "totalRows": 3 }
+  }
+}
+```
+
+### StepResult (window function)
+
+```json
+{
+  "clause": "SELECT",
+  "sql": "SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM a",
+  "data": { "columns": ["ID","RN"], "rows": [...], "totalRows": 3 },
+  "extras": {
+    "windowFunctions": [{
+      "name": "ROW_NUMBER",
+      "expression": null,
+      "partitionBy": null,
+      "orderBy": "[id]",
+      "windowFrame": null
+    }]
+  }
+}
+```
+
+### StepResult (compound statement)
+
+```json
+{
+  "clause": "#1 SELECT",
+  "sql": "SELECT * FROM a WHERE id = 1",
+  "data": { "columns": ["ID","NAME"], "rows": [...], "totalRows": 1 }
 }
 ```
 
@@ -254,17 +328,19 @@ Seeql/
 │       │   ├── TableData.java
 │       │   └── QueryStepResponse.java
 │       ├── service/
-│       │   └── QueryService.java
+│       │   └── QueryService.java           # pipeline + SET/compound/UPDATE/DELETE
 │       └── strategy/
-│           ├── StepStrategy.java          # interface
-│           ├── StepContext.java           # shared context
-│           ├── CteStrategy.java
+│           ├── StepStrategy.java            # interface
+│           ├── StepContext.java             # shared context
+│           ├── CteStrategy.java             # incl. recursive CTE iteration
 │           ├── FromStrategy.java
-│           ├── JoinStrategy.java
-│           ├── WhereStrategy.java
+│           ├── JoinStrategy.java            # INNER/LEFT/RIGHT/CROSS/LATERAL
+│           ├── WhereStrategy.java           # subquery detection
 │           ├── GroupByStrategy.java
 │           ├── HavingStrategy.java
-│           └── SelectStrategy.java
+│           ├── SelectStrategy.java          # window function annotation
+│           ├── OrderByStrategy.java
+│           └── LimitStrategy.java
 │
 ├── Frontend/fitkit-web/
 │   ├── app/
@@ -274,14 +350,14 @@ Seeql/
 │   │   ├── sql-editor/SqlEditor.tsx
 │   │   ├── data-panel/DataPanel.tsx
 │   │   ├── table-canvas/
-│   │   │   ├── TableCanvas.tsx           # animation router
+│   │   │   ├── TableCanvas.tsx             # animation router
 │   │   │   ├── StepTimeline.tsx
-│   │   │   ├── AnimatedTable.tsx
-│   │   │   ├── GroupAnimation.tsx        # 5-phase
-│   │   │   ├── CteAnimation.tsx          # 4-phase
-│   │   │   ├── DistinctAnimation.tsx     # 4-phase
-│   │   │   └── JoinAnimation.tsx         # 4-phase
-│   │   └── ui/                           # shadcn components
+│   │   │   ├── AnimatedTable.tsx           # diff mode for WHERE/HAVING/LIMIT
+│   │   │   ├── GroupAnimation.tsx          # 5-phase
+│   │   │   ├── CteAnimation.tsx            # 4-phase
+│   │   │   ├── DistinctAnimation.tsx       # 4-phase
+│   │   │   └── JoinAnimation.tsx           # 4-phase (INNER/LEFT/RIGHT/CROSS)
+│   │   └── ui/                             # shadcn components
 │   ├── hooks/
 │   │   └── use-phase-stepper.ts
 │   └── lib/
@@ -289,7 +365,7 @@ Seeql/
 │       ├── types.ts
 │       ├── animation-utils.ts
 │       ├── clause-highlighter.ts
-│       ├── problems.ts                   # 12 LeetCode problems
+│       ├── problems.ts                     # 12 LeetCode problems
 │       └── utils.ts
 │
 └── README.md
@@ -310,8 +386,16 @@ Seeql/
 ## Key Design Decisions
 
 - **Single request/response**: Backend returns ALL step results in one response. Frontend owns animation timing and pacing.
-- **Strategy pattern**: Each SQL clause (FROM, WHERE, GROUP BY, HAVING, SELECT, JOIN, CTE) is a separate strategy class implementing `StepStrategy`. Adding a new clause type = adding one new class → no existing code changes.
+- **Strategy pattern**: Each SQL clause (FROM, WHERE, GROUP BY, HAVING, SELECT, DISTINCT, JOIN, ORDER BY, LIMIT, CTE) is a separate strategy class implementing `StepStrategy`. Adding a new clause type = adding one new class → no existing code changes.
 - **Progressive JOIN building**: The Nth JOIN step includes all N joins in its FROM clause, so CTE + multi-JOIN queries work correctly.
+- **Implicit comma joins (`FROM a, b`)**: Parsed as `isSimple()` cross joins by JSQLParser. JoinStrategy appends `, rightItem` (not ` join.toString()` which would produce `a b` = `a AS b`).
+- **LATERAL joins**: Detected via `instanceof LateralSubSelect`. Inner subquery extracted and executed independently (if not correlated). Labeled `LATERAL JOIN`.
+- **Subqueries in WHERE**: `ParenthesedSelect` nodes detected via `ExpressionVisitorAdapter` overriding `visit(Select)` (not `visit(ParenthesedSelect)` — JSQLParser 5.3 dispatches to `visit(Select)` for all `Select` subtypes).
+- **Recursive CTE**: Detected via `WithItem.isRecursive()`. Decomposed into `CTE ANCHOR` / `CTE ITER N` / final `WITH name` steps. H2 2.x does not support `WITH RECURSIVE`, so iteration relies on executing the full CTE at each level.
+- **Window functions**: `AnalyticExpression` detected in SELECT items. `name`, `partitionBy`, `orderBy`, `windowFrame` (type/offset/range), `windowDefinition` added to step extras.
+- **UPDATE/DELETE**: Non-SELECT statements decomposed inline in `QueryService`. Show `BEFORE` (full table), `WHERE` (filtered rows), then `UPDATE`/`DELETE` (result) with `beforeData` and `setAssignments` extras.
+- **Compound statements**: Auto-split via `CCJSqlParserUtil.parseStatements()`. Each statement executed independently, step clauses prefixed with `#1`, `#2`, etc.
+- **Set operations**: `SetOperationList` (UNION/INTERSECT/EXCEPT) — each `SELECT` executed independently, then combined in final step.
 - **CTE-body exclusion**: Clause-highlighter skips standard SQL keywords inside CTE body parentheses — only main-query clauses are highlighted.
 - **Shared animation primitives**: `rowKey`, `GROUP_COLORS`, `CLAUSE_BADGE_COLORS`, `getGroupColor`, `isGroupStep` are shared across all animation components.
 - **usePhaseStepper**: Custom hook provides prev/next/play/toggle with inline phaseIdx clamp (no crashes when phases array length changes).
