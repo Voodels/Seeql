@@ -44,7 +44,9 @@ public class QueryService {
                 new WhereStrategy(),
                 new GroupByStrategy(),
                 new HavingStrategy(),
-                new SelectStrategy()
+                new SelectStrategy(),
+                new OrderByStrategy(),
+                new LimitStrategy()
             );
 
             for (StepStrategy strategy : pipeline) {

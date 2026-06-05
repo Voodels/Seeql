@@ -62,6 +62,7 @@ export function findClauseSpans(
     "ORDER BY": ["ORDER BY"],
     DISTINCT: ["DISTINCT"],
     JOIN: ["JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN", "CROSS JOIN"],
+    LIMIT: ["LIMIT"],
   }
 
   const activeKeywords = clauseMap[activeClause] || (

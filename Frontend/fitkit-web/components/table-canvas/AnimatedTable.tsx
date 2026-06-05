@@ -14,7 +14,7 @@ interface AnimatedTableProps {
 
 export function AnimatedTable({ data, previousData, clause }: AnimatedTableProps) {
   const isGrouping = isGroupStep(previousData, data)
-  const isFiltering = clause === "WHERE" || clause === "HAVING"
+  const isFiltering = clause === "WHERE" || clause === "HAVING" || clause === "LIMIT"
 
   const diffRows = useMemo(() => {
     if (!isFiltering || !previousData) return null

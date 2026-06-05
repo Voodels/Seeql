@@ -50,13 +50,39 @@ public class StepContext {
     public StringBuilder getProgressiveFrom() { return progressiveFrom; }
     public String getFromClause() { return progressiveFrom.toString(); }
     public TableData getFinalResult() { return finalResult; }
-    public void setFinalResult(TableData finalResult) { this.finalResult = finalResult; }
+    public void setFinalResult(TableData r) { this.finalResult = r; }
+    public TableData getPreviousStepData() {
+        return steps.isEmpty() ? null : steps.get(steps.size() - 1).getData();
+    }
 
     public void addStep(StepResult step) { steps.add(step); }
+
     public TableData execute(String sql) {
         List<Map<String, Object>> rows = jdbc.queryForList(sql);
         List<String> columns = new ArrayList<>();
         if (!rows.isEmpty()) columns.addAll(rows.getFirst().keySet());
         return new TableData(columns, rows);
+    }
+
+    /** Rebuild SELECT SQL with certain clauses temporarily removed */
+    public String rebuildSelectSql(boolean includeOrderBy, boolean includeLimit) {
+        List<OrderByElement> savedOb = plainSelect.getOrderByElements();
+        Limit savedLimit = plainSelect.getLimit();
+
+        if (!includeOrderBy) plainSelect.setOrderByElements(null);
+        if (!includeLimit) plainSelect.setLimit(null);
+
+        // plainSelect.toString() may include the CTE prefix internally.
+        // To avoid duplication, only prepend ctePrefix when there's no CTE
+        // (non-CTE queries don't need it; CTE queries have it in toString).
+        String sql = plainSelect.toString();
+        // If the output doesn't start with SELECT, it likely already has WITH
+        if (sql.matches("(?is)^\\s*SELECT\\b.*")) {
+            sql = ctePrefix + sql;
+        }
+
+        plainSelect.setOrderByElements(savedOb);
+        plainSelect.setLimit(savedLimit);
+        return sql;
     }
 }
