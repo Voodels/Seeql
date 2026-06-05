@@ -6,15 +6,30 @@ import { Database, Play } from "lucide-react"
 
 interface DataPanelProps {
   onSetup: (ddl: string, dml: string) => Promise<void>
+  ddl?: string
+  dml?: string
+  onDdlChange?: (ddl: string) => void
+  onDmlChange?: (dml: string) => void
 }
 
-export function DataPanel({ onSetup }: DataPanelProps) {
-  const [ddl, setDdl] = useState(
+export function DataPanel({ onSetup, ddl: controlledDdl, dml: controlledDml, onDdlChange, onDmlChange }: DataPanelProps) {
+  const [localDdl, setLocalDdl] = useState(
     "CREATE TABLE Logs (\n  id INT PRIMARY KEY,\n  num INT\n)"
   )
-  const [dml, setDml] = useState(
+  const [localDml, setLocalDml] = useState(
     "INSERT INTO Logs VALUES\n  (1, 1),\n  (2, 1),\n  (3, 1),\n  (4, 2),\n  (5, 1),\n  (6, 2),\n  (7, 2)"
   )
+  const ddl = controlledDdl ?? localDdl
+  const dml = controlledDml ?? localDml
+
+  const handleDdlChange = (val: string) => {
+    setLocalDdl(val)
+    onDdlChange?.(val)
+  }
+  const handleDmlChange = (val: string) => {
+    setLocalDml(val)
+    onDmlChange?.(val)
+  }
   const [isLoading, setIsLoading] = useState(false)
 
   const handleSetup = async () => {
@@ -50,7 +65,7 @@ export function DataPanel({ onSetup }: DataPanelProps) {
         </div>
         <textarea
           value={ddl}
-          onChange={(e) => setDdl(e.target.value)}
+          onChange={(e) => handleDdlChange(e.target.value)}
           className="flex-1 min-h-[100px] resize-none border-0 bg-transparent px-3 font-mono text-xs outline-none"
           spellCheck={false}
         />
@@ -59,7 +74,7 @@ export function DataPanel({ onSetup }: DataPanelProps) {
         </div>
         <textarea
           value={dml}
-          onChange={(e) => setDml(e.target.value)}
+          onChange={(e) => handleDmlChange(e.target.value)}
           className="flex-1 min-h-[100px] resize-none border-0 bg-transparent px-3 font-mono text-xs outline-none"
           spellCheck={false}
         />
