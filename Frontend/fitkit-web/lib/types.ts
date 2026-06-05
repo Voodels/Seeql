@@ -8,6 +8,7 @@ export interface StepResult {
   clause: string
   sql: string
   data: TableData
+  groupColumns?: string[]
 }
 
 export interface QueryStepResponse {

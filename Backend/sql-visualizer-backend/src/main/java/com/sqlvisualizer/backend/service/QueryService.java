@@ -4,6 +4,7 @@ import com.sqlvisualizer.backend.model.QueryStepResponse;
 import com.sqlvisualizer.backend.model.QueryStepResponse.StepResult;
 import com.sqlvisualizer.backend.model.TableData;
 import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.*;
@@ -49,7 +50,14 @@ public class QueryService {
             // Step 3: GROUP BY
             if (plainSelect.getGroupBy() != null) {
                 String groupSql = buildGroupBySql(plainSelect, fromItem);
-                steps.add(new StepResult("GROUP BY", groupSql, executeQuery(groupSql)));
+                List<String> groupCols = new ArrayList<>();
+                ExpressionList groupExprList = plainSelect.getGroupBy().getGroupByExpressionList();
+                if (groupExprList != null) {
+                    for (Object expr : groupExprList.getExpressions()) {
+                        groupCols.add(expr.toString().toUpperCase());
+                    }
+                }
+                steps.add(new StepResult("GROUP BY", groupSql, executeQuery(groupSql), groupCols));
             }
 
             // Step 4: HAVING

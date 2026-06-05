@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { StepTimeline } from "./StepTimeline"
 import { AnimatedTable } from "./AnimatedTable"
+import { GroupAnimation } from "./GroupAnimation"
 import type { StepResult, TableData } from "@/lib/types"
 
 interface TableCanvasProps {
@@ -14,16 +15,17 @@ interface TableCanvasProps {
 export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableCanvasProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [groupAnimComplete, setGroupAnimComplete] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const prevStepRef = useRef<StepResult | null>(null)
 
   const step = steps[currentStep]
   const data = step?.data ?? finalResult
 
-  // Previous step's data for diff comparison
   const previousData = currentStep > 0
     ? steps[currentStep - 1]?.data
     : undefined
+
+  const isGroupStep = step?.clause === "GROUP BY" && !!step?.groupColumns?.length
 
   // Notify parent about active clause
   useEffect(() => {
@@ -32,13 +34,15 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
     }
   }, [currentStep, step, onActiveClauseChange])
 
-  // Reset to first step when steps change
+  // Reset when steps change
   useEffect(() => {
     setCurrentStep(0)
     setIsPlaying(false)
+    setGroupAnimComplete(false)
   }, [steps.length])
 
   const goToStep = useCallback((index: number) => {
+    setGroupAnimComplete(false)
     setCurrentStep(Math.max(0, Math.min(index, steps.length - 1)))
   }, [steps.length])
 
@@ -51,13 +55,19 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
       setIsPlaying(false)
       return
     }
+    // For GROUP BY steps, wait for animation to complete
+    if (isGroupStep && !groupAnimComplete) {
+      if (timerRef.current) clearTimeout(timerRef.current)
+      return
+    }
     timerRef.current = setTimeout(() => {
       setCurrentStep((prev) => prev + 1)
-    }, 1800)
+      setGroupAnimComplete(false)
+    }, 1200)
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [isPlaying, currentStep, steps.length])
+  }, [isPlaying, currentStep, steps.length, isGroupStep, groupAnimComplete])
 
   const togglePlay = useCallback(() => {
     if (currentStep >= steps.length - 1) {
@@ -65,6 +75,10 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
     }
     setIsPlaying((prev) => !prev)
   }, [currentStep, steps.length])
+
+  const handleGroupComplete = useCallback(() => {
+    setGroupAnimComplete(true)
+  }, [])
 
   if (!steps.length) return null
 
@@ -77,9 +91,9 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
         isPlaying={isPlaying}
         onPlayToggle={togglePlay}
       />
-      <div className="flex-1 p-4 overflow-auto">
+      <div className="flex-1 overflow-auto">
         {step && (
-          <div className="mb-3 flex items-center gap-2">
+          <div className="px-4 pt-3 pb-1 flex items-center gap-2">
             <span className={clsx("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded", CLAUSE_BADGE_COLORS[step.clause] || "bg-muted text-muted-foreground")}>
               {step.clause}
             </span>
@@ -96,11 +110,22 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
             </span>
           </div>
         )}
-        <AnimatedTable
-          data={data}
-          previousData={previousData}
-          clause={step?.clause}
-        />
+
+        {isGroupStep && previousData ? (
+          <GroupAnimation
+            previousData={previousData}
+            step={step}
+            onComplete={handleGroupComplete}
+          />
+        ) : (
+          <div className="p-4">
+            <AnimatedTable
+              data={data}
+              previousData={previousData}
+              clause={step?.clause}
+            />
+          </div>
+        )}
       </div>
     </div>
   )
