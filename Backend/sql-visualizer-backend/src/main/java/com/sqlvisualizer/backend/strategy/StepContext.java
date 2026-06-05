@@ -31,10 +31,10 @@ public class StepContext {
         this.originalSql = originalSql;
         this.withItems = withItems;
         this.hasCTE = withItems != null && !withItems.isEmpty();
-        this.fromItem = plainSelect.getFromItem().toString();
+        this.fromItem = plainSelect.getFromItem() != null ? plainSelect.getFromItem().toString() : null;
         this.joins = plainSelect.getJoins();
         this.hasJoins = joins != null && !joins.isEmpty();
-        this.progressiveFrom = new StringBuilder(fromItem);
+        this.progressiveFrom = new StringBuilder(fromItem != null ? fromItem : "");
     }
 
     public JdbcTemplate getJdbc() { return jdbc; }

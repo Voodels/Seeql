@@ -1,2 +1,4 @@
 springboot.zip
 *.log
+*.class
+net/

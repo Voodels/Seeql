@@ -32,8 +32,11 @@ export const CLAUSE_BADGE_COLORS: Record<string, string> = {
 }
 
 export function getClauseBadgeColor(clause: string): string {
-  if (clause.startsWith("WITH ")) return "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800"
-  if (clause.startsWith("JOIN ")) return CLAUSE_BADGE_COLORS["JOIN"]
+  if (clause.startsWith("WITH ") || clause.startsWith("CTE ")) return "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800"
+  if (clause.includes("JOIN ")) return CLAUSE_BADGE_COLORS["JOIN"]
+  if (clause.startsWith("BEFORE")) return "bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400 border-slate-200 dark:border-slate-800"
+  if (clause === "UPDATE" || clause === "DELETE") return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800"
+  if (clause.startsWith("#")) return "bg-muted text-foreground border-border/50"
   return CLAUSE_BADGE_COLORS[clause] || "bg-muted text-muted-foreground border-border"
 }
 

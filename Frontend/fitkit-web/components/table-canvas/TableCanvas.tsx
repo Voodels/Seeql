@@ -29,7 +29,7 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
   const isGroupStep = step?.clause === "GROUP BY" && !!step?.groupColumns?.length
   const isCteStep = step?.clause?.startsWith("WITH ") ?? false
   const isDistinctStep = step?.clause === "DISTINCT"
-  const isJoinStep = step?.clause?.startsWith("JOIN ") ?? false
+  const isJoinStep = step?.clause?.includes("JOIN ") ?? false
 
   useEffect(() => {
     if (step && onActiveClauseChange) onActiveClauseChange(step.clause)

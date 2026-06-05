@@ -14,7 +14,7 @@ export function findClauses(sql: string): ClauseLocation[] {
   }
 
   // 2. Standard SQL clauses — skip those inside CTE bodies
-  const re = /\b(SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|(?:LEFT|RIGHT|INNER|FULL|CROSS|NATURAL)?\s*JOIN)\b/gi
+  const re = /\b(SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|(?:LEFT|RIGHT|INNER|FULL|CROSS|NATURAL|LATERAL)?\s*JOIN)\b/gi
   let match: RegExpExecArray | null
   while ((match = re.exec(sql)) !== null) {
     if (!isInsideCteBody(match.index)) {
@@ -61,12 +61,13 @@ export function findClauseSpans(
     HAVING: ["HAVING"],
     "ORDER BY": ["ORDER BY"],
     DISTINCT: ["DISTINCT"],
-    JOIN: ["JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN", "CROSS JOIN"],
+    JOIN: ["JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN", "CROSS JOIN", "LATERAL JOIN"],
     LIMIT: ["LIMIT"],
   }
 
+  const upper = activeClause.toUpperCase()
   const activeKeywords = clauseMap[activeClause] || (
-    activeClause.toUpperCase().startsWith("WITH ")
+    upper.startsWith("WITH ") || upper.includes("JOIN ") || upper.startsWith("CTE ")
       ? [activeClause]
       : [activeClause, activeClause.split(" ")[0]]
   )
