@@ -29,6 +29,11 @@ public class QueryService {
                 throw new IllegalArgumentException("Only SELECT queries are supported");
             }
 
+            // Build CTE prefix if present
+            List<WithItem<?>> withItems = select.getWithItemsList();
+            boolean hasCTE = withItems != null && !withItems.isEmpty();
+            String ctePrefix = buildCtePrefix(withItems);
+
             PlainSelect plainSelect = select.getPlainSelect();
             if (plainSelect == null) {
                 return executeSimple(sql);
@@ -37,19 +42,41 @@ public class QueryService {
             List<StepResult> steps = new ArrayList<>();
             String fromItem = plainSelect.getFromItem().toString();
 
-            // Step 1: FROM (raw data)
-            String fromSql = "SELECT * FROM " + fromItem;
-            steps.add(new StepResult("FROM", fromSql, executeQuery(fromSql)));
+            // Show base table + CTE steps
+            if (hasCTE && withItems != null) {
+                // Extract base table from the first CTE's inner query
+                WithItem<?> firstCTE = withItems.get(0);
+                ParenthesedSelect pSelect = firstCTE.getSelect();
+                if (pSelect != null) {
+                    PlainSelect ctePlain = pSelect.getPlainSelect();
+                    if (ctePlain != null && ctePlain.getFromItem() != null) {
+                        String baseTable = ctePlain.getFromItem().toString();
+                        steps.add(new StepResult("FROM", "SELECT * FROM " + baseTable, executeQuery("SELECT * FROM " + baseTable)));
+                    }
+                }
+                // Show each CTE result
+                for (WithItem<?> withItem : withItems) {
+                    String cteName = withItem.getAliasName();
+                    if (cteName == null) continue;
+                    String cteSql = ctePrefix + "SELECT * FROM " + cteName;
+                    steps.add(new StepResult("WITH " + cteName, cteSql, executeQuery(cteSql)));
+                }
+            } else {
+                steps.add(new StepResult("FROM", "SELECT * FROM " + fromItem, executeQuery("SELECT * FROM " + fromItem)));
+            }
 
-            // Step 2: WHERE
+            // Build intermediate queries with CTE prefix
+            String sqlPrefix = ctePrefix;
+
+            // WHERE
             if (plainSelect.getWhere() != null) {
-                String whereSql = "SELECT * FROM " + fromItem + " WHERE " + plainSelect.getWhere();
+                String whereSql = sqlPrefix + "SELECT * FROM " + fromItem + " WHERE " + plainSelect.getWhere();
                 steps.add(new StepResult("WHERE", whereSql, executeQuery(whereSql)));
             }
 
-            // Step 3: GROUP BY
+            // GROUP BY
             if (plainSelect.getGroupBy() != null) {
-                String groupSql = buildGroupBySql(plainSelect, fromItem);
+                String groupSql = sqlPrefix + buildGroupBySql(plainSelect, fromItem);
                 List<String> groupCols = new ArrayList<>();
                 ExpressionList groupExprList = plainSelect.getGroupBy().getGroupByExpressionList();
                 if (groupExprList != null) {
@@ -60,13 +87,13 @@ public class QueryService {
                 steps.add(new StepResult("GROUP BY", groupSql, executeQuery(groupSql), groupCols));
             }
 
-            // Step 4: HAVING
+            // HAVING
             if (plainSelect.getHaving() != null) {
-                String havingSql = buildHavingSql(plainSelect, fromItem);
+                String havingSql = sqlPrefix + buildHavingSql(plainSelect, fromItem);
                 steps.add(new StepResult("HAVING", havingSql, executeQuery(havingSql)));
             }
 
-            // Step 5: final SELECT
+            // Final SELECT
             TableData finalResult = executeQuery(sql);
             steps.add(new StepResult("SELECT", sql, finalResult));
 
@@ -88,6 +115,16 @@ public class QueryService {
 
     public void executeDdl(String sql) {
         jdbcTemplate.execute(sql);
+    }
+
+    private String buildCtePrefix(List<WithItem<?>> withItems) {
+        if (withItems == null || withItems.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("WITH ");
+        for (int i = 0; i < withItems.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(withItems.get(i).toString());
+        }
+        return sb.toString() + " ";
     }
 
     private String buildGroupBySql(PlainSelect plainSelect, String fromItem) {

@@ -4,6 +4,8 @@ import { useState, useRef, useCallback, useEffect } from "react"
 import { StepTimeline } from "./StepTimeline"
 import { AnimatedTable } from "./AnimatedTable"
 import { GroupAnimation } from "./GroupAnimation"
+import { CteAnimation } from "./CteAnimation"
+import { getClauseBadgeColor } from "@/lib/animation-utils"
 import type { StepResult, TableData } from "@/lib/types"
 
 interface TableCanvasProps {
@@ -20,21 +22,15 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
 
   const step = steps[currentStep]
   const data = step?.data ?? finalResult
-
-  const previousData = currentStep > 0
-    ? steps[currentStep - 1]?.data
-    : undefined
+  const previousData = currentStep > 0 ? steps[currentStep - 1]?.data : undefined
 
   const isGroupStep = step?.clause === "GROUP BY" && !!step?.groupColumns?.length
+  const isCteStep = step?.clause?.startsWith("WITH ") ?? false
 
-  // Notify parent about active clause
   useEffect(() => {
-    if (step && onActiveClauseChange) {
-      onActiveClauseChange(step.clause)
-    }
+    if (step && onActiveClauseChange) onActiveClauseChange(step.clause)
   }, [currentStep, step, onActiveClauseChange])
 
-  // Reset when steps change
   useEffect(() => {
     setCurrentStep(0)
     setIsPlaying(false)
@@ -55,8 +51,7 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
       setIsPlaying(false)
       return
     }
-    // For GROUP BY steps, wait for animation to complete
-    if (isGroupStep && !groupAnimComplete) {
+    if ((isGroupStep || isCteStep) && !groupAnimComplete) {
       if (timerRef.current) clearTimeout(timerRef.current)
       return
     }
@@ -64,21 +59,22 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
       setCurrentStep((prev) => prev + 1)
       setGroupAnimComplete(false)
     }, 1200)
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [isPlaying, currentStep, steps.length, isGroupStep, groupAnimComplete])
+    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
+  }, [isPlaying, currentStep, steps.length, isGroupStep, isCteStep, groupAnimComplete])
 
   const togglePlay = useCallback(() => {
-    if (currentStep >= steps.length - 1) {
-      setCurrentStep(0)
-    }
+    if (currentStep >= steps.length - 1) setCurrentStep(0)
     setIsPlaying((prev) => !prev)
   }, [currentStep, steps.length])
 
   const handleGroupComplete = useCallback(() => {
     setGroupAnimComplete(true)
-  }, [])
+    // When not in auto-play, advance immediately
+    if (!isPlaying && currentStep < steps.length - 1) {
+      setCurrentStep((prev) => prev + 1)
+      setGroupAnimComplete(false)
+    }
+  }, [isPlaying, currentStep, steps.length])
 
   if (!steps.length) return null
 
@@ -94,10 +90,10 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
       <div className="flex-1 overflow-auto">
         {step && (
           <div className="px-4 pt-3 pb-1 flex items-center gap-2">
-            <span className={clsx("text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded", CLAUSE_BADGE_COLORS[step.clause] || "bg-muted text-muted-foreground")}>
+            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getClauseBadgeColor(step.clause)}`}>
               {step.clause}
             </span>
-            <code className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded flex-1 truncate">
+            <code className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded flex-1 truncate font-mono">
               {step.sql}
             </code>
             <span className="text-[10px] text-muted-foreground whitespace-nowrap">
@@ -113,8 +109,18 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
 
         {isGroupStep && previousData ? (
           <GroupAnimation
+            key={step.clause}
             previousData={previousData}
             step={step}
+            onComplete={handleGroupComplete}
+          />
+        ) : isCteStep && previousData ? (
+          <CteAnimation
+            key={step.clause}
+            previousData={previousData}
+            currentData={data}
+            cteName={step.clause.replace("WITH ", "")}
+            cteSql={step.sql}
             onComplete={handleGroupComplete}
           />
         ) : (
@@ -129,17 +135,4 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
       </div>
     </div>
   )
-}
-
-const CLAUSE_BADGE_COLORS: Record<string, string> = {
-  FROM: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  WHERE: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  "GROUP BY": "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-  HAVING: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  "ORDER BY": "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400",
-  SELECT: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-}
-
-function clsx(...classes: (string | false | undefined | null)[]): string {
-  return classes.filter(Boolean).join(" ")
 }

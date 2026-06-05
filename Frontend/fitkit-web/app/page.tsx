@@ -9,7 +9,7 @@ import { executeQuery, setupDataset } from "@/lib/api"
 import type { StepResult, TableData } from "@/lib/types"
 
 export default function Home() {
-  const [sql, setSql] = useState(`SELECT category, region, SUM(amount) AS total_sales, AVG(quantity) AS avg_qty, COUNT(*) AS orders\nFROM sales\nWHERE amount > 50\nGROUP BY category, region\nHAVING SUM(amount) > 300\nORDER BY total_sales DESC`)
+  const [sql, setSql] = useState(`WITH NumberedLogs AS (\n  SELECT id, num,\n    ROW_NUMBER() OVER (PARTITION BY num ORDER BY id) AS num_counter\n  FROM Logs\n),\nStreaks AS (\n  SELECT num, (id - num_counter) AS streak_id\n  FROM NumberedLogs\n)\nSELECT DISTINCT num AS ConsecutiveNums\nFROM Streaks\nGROUP BY num, streak_id\nHAVING COUNT(*) >= 3`)
   const [steps, setSteps] = useState<StepResult[]>([])
   const [finalResult, setFinalResult] = useState<TableData | null>(null)
   const [isLoading, setIsLoading] = useState(false)

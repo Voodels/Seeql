@@ -22,6 +22,11 @@ const clauseColors: Record<string, string> = {
   "ORDER BY": "bg-cyan-200/60 dark:bg-cyan-800/30",
 }
 
+function getClauseColor(clause: string): string {
+  if (clause.startsWith("WITH ")) return "bg-cyan-200/60 dark:bg-cyan-800/30"
+  return clauseColors[clause] || "bg-yellow-200/40 dark:bg-yellow-800/30"
+}
+
 export function SqlEditor({ value, onChange, onExecute, isLoading, activeClause }: SqlEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -42,12 +47,7 @@ export function SqlEditor({ value, onChange, onExecute, isLoading, activeClause 
         </span>
         <div className="flex items-center gap-1.5">
           {activeClause && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold"
-              style={{
-                backgroundColor: clauseColors[activeClause]?.split(" ")[0] || "transparent",
-                color: "var(--foreground)"
-              }}
-            >
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${getClauseColor(activeClause)}`}>
               {activeClause}
             </span>
           )}
@@ -78,7 +78,7 @@ export function SqlEditor({ value, onChange, onExecute, isLoading, activeClause 
               key={i}
               className={
                 span.highlight
-                  ? clauseColors[activeClause || ""] || "bg-yellow-200/40 dark:bg-yellow-800/30"
+                  ? getClauseColor(activeClause || "")
                   : ""
               }
             >

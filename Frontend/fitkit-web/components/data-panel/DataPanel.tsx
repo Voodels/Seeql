@@ -10,10 +10,10 @@ interface DataPanelProps {
 
 export function DataPanel({ onSetup }: DataPanelProps) {
   const [ddl, setDdl] = useState(
-    "CREATE TABLE logs (\n  id INT,\n  val INT,\n  category VARCHAR(10)\n)"
+    "CREATE TABLE Logs (\n  id INT PRIMARY KEY,\n  num INT\n)"
   )
   const [dml, setDml] = useState(
-    "INSERT INTO logs VALUES\n  (1, 5, 'A'),\n  (2, 3, 'A'),\n  (3, 8, 'B'),\n  (4, 2, 'B'),\n  (5, 6, 'A')"
+    "INSERT INTO Logs VALUES\n  (1, 1),\n  (2, 1),\n  (3, 1),\n  (4, 2),\n  (5, 1),\n  (6, 2),\n  (7, 2)"
   )
   const [isLoading, setIsLoading] = useState(false)
 

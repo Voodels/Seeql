@@ -1,5 +1,3 @@
-const CLAUSE_REGEX = /\b(SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN)\b/i
-
 export interface ClauseLocation {
   keyword: string
   start: number
@@ -8,14 +6,35 @@ export interface ClauseLocation {
 
 export function findClauses(sql: string): ClauseLocation[] {
   const clauses: ClauseLocation[] = []
+
+  // 1. Find CTE body paren ranges to exclude clauses inside CTE definitions
+  const cteBodyRanges = findCteBodyRanges(sql)
+  function isInsideCteBody(pos: number): boolean {
+    return cteBodyRanges.some((r) => pos >= r.start && pos < r.end)
+  }
+
+  // 2. Standard SQL clauses — skip those inside CTE bodies
   const re = /\b(SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT)\b/gi
   let match: RegExpExecArray | null
-
   while ((match = re.exec(sql)) !== null) {
+    if (!isInsideCteBody(match.index)) {
+      clauses.push({
+        keyword: match[0].toUpperCase(),
+        start: match.index,
+        end: match.index + match[0].length,
+      })
+    }
+  }
+
+  // 3. CTE name clauses (always included — they are the CTE definitions themselves)
+  const cteRe = /(?:\bWITH\s+|\)\s*,\s*)(\w+)\s+AS\s*\(/gi
+  while ((match = cteRe.exec(sql)) !== null) {
+    const cteName = match[1].toUpperCase()
+    const nameStart = match.index + match[0].indexOf(match[1])
     clauses.push({
-      keyword: match[0].toUpperCase(),
-      start: match.index,
-      end: match.index + match[0].length,
+      keyword: `WITH ${cteName}`,
+      start: nameStart,
+      end: nameStart,
     })
   }
 
@@ -34,8 +53,6 @@ export function findClauseSpans(
   const spans: { text: string; highlight: boolean }[] = []
   let cursor = 0
 
-  // Determine the "range" of the active clause: from its keyword to the next clause
-  // Map clause name to regex pattern
   const clauseMap: Record<string, string[]> = {
     SELECT: ["SELECT"],
     FROM: ["FROM"],
@@ -45,8 +62,11 @@ export function findClauseSpans(
     "ORDER BY": ["ORDER BY"],
   }
 
-  const activeKeywords = clauseMap[activeClause] || [activeClause]
-  const upperSql = sql.toUpperCase()
+  const activeKeywords = clauseMap[activeClause] || (
+    activeClause.toUpperCase().startsWith("WITH ")
+      ? [activeClause]
+      : [activeClause, activeClause.split(" ")[0]]
+  )
 
   for (let i = 0; i < clauses.length; i++) {
     const clause = clauses[i]
@@ -54,10 +74,12 @@ export function findClauseSpans(
       spans.push({ text: sql.slice(cursor, clause.start), highlight: false })
     }
 
-    // Determine if this clause is the active one
-    const isActive = activeKeywords.some((kw) => clause.keyword.startsWith(kw))
+    const isActive = activeKeywords.some((kw) => {
+      const upperClause = clause.keyword.toUpperCase()
+      const upperKw = kw.toUpperCase()
+      return upperClause === upperKw || upperClause.startsWith(upperKw)
+    })
 
-    // Find the end of this clause's span (until next clause keyword)
     const nextClause = clauses[i + 1]
     const clauseEnd = nextClause ? nextClause.start : sql.length
     const clauseText = sql.slice(clause.start, clauseEnd)
@@ -71,4 +93,25 @@ export function findClauseSpans(
   }
 
   return spans
+}
+
+function findCteBodyRanges(sql: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = []
+  const re = /(?:\bWITH\s+|\)\s*,\s*)(\w+)\s+AS\s*\(/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(sql)) !== null) {
+    const parenStart = match.index + match[0].length - 1
+    if (sql[parenStart] !== "(") continue
+    let depth = 1
+    let i = parenStart + 1
+    while (i < sql.length && depth > 0) {
+      if (sql[i] === "(") depth++
+      else if (sql[i] === ")") depth--
+      i++
+    }
+    if (depth === 0) {
+      ranges.push({ start: parenStart, end: i })
+    }
+  }
+  return ranges
 }
