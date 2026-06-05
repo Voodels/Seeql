@@ -1,6 +1,7 @@
 package com.sqlvisualizer.backend.model;
 
 import java.util.List;
+import java.util.Map;
 
 public class QueryStepResponse {
     private List<StepResult> steps;
@@ -19,21 +20,28 @@ public class QueryStepResponse {
         private String sql;
         private TableData data;
         private List<String> groupColumns;
+        private Map<String, Object> extras;
 
         public StepResult(String clause, String sql, TableData data) {
-            this(clause, sql, data, null);
+            this(clause, sql, data, null, null);
         }
 
         public StepResult(String clause, String sql, TableData data, List<String> groupColumns) {
+            this(clause, sql, data, groupColumns, null);
+        }
+
+        public StepResult(String clause, String sql, TableData data, List<String> groupColumns, Map<String, Object> extras) {
             this.clause = clause;
             this.sql = sql;
             this.data = data;
             this.groupColumns = groupColumns;
+            this.extras = extras;
         }
 
         public String getClause() { return clause; }
         public String getSql() { return sql; }
         public TableData getData() { return data; }
         public List<String> getGroupColumns() { return groupColumns; }
+        public Map<String, Object> getExtras() { return extras; }
     }
 }

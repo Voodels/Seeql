@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { SqlEditor } from "@/components/sql-editor/SqlEditor"
 import { TableCanvas } from "@/components/table-canvas/TableCanvas"
 import { DataPanel } from "@/components/data-panel/DataPanel"
@@ -9,6 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { executeQuery, setupDataset } from "@/lib/api"
 import { PROBLEMS } from "@/lib/problems"
 import type { StepResult, TableData } from "@/lib/types"
+
+const difficultyStyles: Record<string, string> = {
+  Easy: "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800",
+  Medium: "text-amber-600 bg-amber-50 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800",
+  Hard: "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
+}
 
 export default function Home() {
   const [sql, setSql] = useState(PROBLEMS[9].solution)
@@ -21,13 +27,13 @@ export default function Home() {
   const [ddl, setDdl] = useState(PROBLEMS[9].ddl)
   const [dml, setDml] = useState(PROBLEMS[9].dml)
 
-  const currentProblemId = PROBLEMS.find((p) => p.solution === sql)?.id || "custom"
+  const problem = PROBLEMS.find((p) => p.solution === sql)
 
-  const handleExecute = useCallback(async (sqlOverride?: string) => {
+  const handleExecute = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await executeQuery(sqlOverride ?? sql, true)
+      const res = await executeQuery(sql, true)
       setSteps(res.steps)
       setFinalResult(res.finalResult)
     } catch (err) {
@@ -49,25 +55,24 @@ export default function Home() {
   }, [])
 
   const handleProblemSelect = useCallback(async (problemId: string) => {
-    const problem = PROBLEMS.find((p) => p.id === problemId)
-    if (!problem) return
+    const p = PROBLEMS.find((x) => x.id === problemId)
+    if (!p) return
 
-    setDdl(problem.ddl)
-    setDml(problem.dml)
-    setSql(problem.solution)
+    setDdl(p.ddl)
+    setDml(p.dml)
+    setSql(p.solution)
     setDbReady(false)
     setSteps([])
     setFinalResult(null)
     setActiveClause("")
     setError(null)
 
-    // Auto-setup + execute
     setIsLoading(true)
     try {
-      await setupDataset(problem.ddl)
-      await setupDataset(problem.dml)
+      await setupDataset(p.ddl)
+      await setupDataset(p.dml)
       setDbReady(true)
-      const res = await executeQuery(problem.solution, true)
+      const res = await executeQuery(p.solution, true)
       setSteps(res.steps)
       setFinalResult(res.finalResult)
     } catch (err) {
@@ -102,48 +107,57 @@ export default function Home() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Left panel */}
         <div className="w-[420px] min-w-[320px] border-r flex flex-col">
-          {/* Problem selector */}
-          <div className="px-3 pt-3 pb-2 border-b">
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 block">
-              Problem Statement
-            </label>
-            <Select value={currentProblemId} onValueChange={handleProblemSelect}>
-              <SelectTrigger className="w-full h-8 text-xs">
-                <SelectValue placeholder="Select a problem..." />
-              </SelectTrigger>
-              <SelectContent>
-                <div className="px-2 py-1 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider border-b">
-                  LeetCode Problems ({PROBLEMS.length})
-                </div>
-                {PROBLEMS.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.id}. {p.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {currentProblemId !== "custom" && (
-              <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">
-                {PROBLEMS.find((p) => p.id === currentProblemId)?.description}
-              </p>
-            )}
-          </div>
-
           <Tabs defaultValue="editor" className="flex flex-col flex-1">
             <TabsList variant="line" className="px-3 pt-2">
               <TabsTrigger value="editor">Query</TabsTrigger>
               <TabsTrigger value="dataset">Dataset</TabsTrigger>
             </TabsList>
+
             <TabsContent value="editor" className="flex flex-col flex-1 overflow-hidden p-0">
+              {/* Problem selector inside the Query tab */}
+              <div className="px-3 pt-3 pb-2 border-b space-y-2">
+                <Select value={problem?.id || "custom"} onValueChange={handleProblemSelect}>
+                  <SelectTrigger className="w-full h-8 text-xs">
+                    <SelectValue placeholder="Select a problem..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <div className="px-2 py-1.5 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider border-b">
+                      LeetCode SQL Problems
+                    </div>
+                    {PROBLEMS.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.id}. {p.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {problem && (
+                  <div className="text-xs space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{problem.title}</span>
+                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${difficultyStyles[problem.difficulty]}`}>
+                        {problem.difficulty}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      {problem.description}
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <SqlEditor
                 value={sql}
                 onChange={setSql}
-                onExecute={() => handleExecute()}
+                onExecute={handleExecute}
                 isLoading={isLoading}
                 activeClause={activeClause}
               />
             </TabsContent>
+
             <TabsContent value="dataset" className="flex flex-col flex-1 overflow-hidden p-0">
               <DataPanel
                 onSetup={handleSetup}
@@ -156,6 +170,7 @@ export default function Home() {
           </Tabs>
         </div>
 
+        {/* Right panel */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {steps.length > 0 && finalResult ? (
             <TableCanvas

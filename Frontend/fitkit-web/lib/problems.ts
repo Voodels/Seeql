@@ -91,6 +91,15 @@ export const PROBLEMS: Problem[] = [
     solution: "SELECT s1.id, COALESCE(s2.student, s1.student) AS student FROM Seat s1 LEFT JOIN Seat s2 ON (CASE WHEN s1.id % 2 = 1 THEN s1.id + 1 ELSE s1.id - 1 END) = s2.id ORDER BY s1.id",
   },
   {
+    id: "175",
+    title: "Combine Two Tables",
+    difficulty: "Easy",
+    description: "Report first name, last name, city, and state of each person. If address missing, show null.",
+    ddl: "CREATE TABLE Person (personId INT PRIMARY KEY, firstName VARCHAR(50), lastName VARCHAR(50));\nCREATE TABLE Address (addressId INT PRIMARY KEY, personId INT, city VARCHAR(50), state VARCHAR(50))",
+    dml: "INSERT INTO Person VALUES\n  (1, 'John', 'Doe'),\n  (2, 'Jane', 'Smith'),\n  (3, 'Bob', 'Johnson');\nINSERT INTO Address VALUES\n  (1, 2, 'New York', 'NY'),\n  (2, 3, 'Los Angeles', 'CA')",
+    solution: "SELECT p.firstName, p.lastName, a.city, a.state FROM Person p LEFT JOIN Address a ON p.personId = a.personId",
+  },
+  {
     id: "180",
     title: "Consecutive Numbers",
     difficulty: "Medium",

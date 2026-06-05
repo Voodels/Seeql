@@ -20,6 +20,7 @@ const clauseColors: Record<string, string> = {
   "GROUP BY": "bg-purple-200/60 dark:bg-purple-800/30",
   HAVING: "bg-red-200/60 dark:bg-red-800/30",
   "ORDER BY": "bg-cyan-200/60 dark:bg-cyan-800/30",
+  DISTINCT: "bg-rose-200/60 dark:bg-rose-800/30",
 }
 
 function getClauseColor(clause: string): string {

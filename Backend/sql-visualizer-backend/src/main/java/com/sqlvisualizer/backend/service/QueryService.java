@@ -41,10 +41,11 @@ public class QueryService {
 
             List<StepResult> steps = new ArrayList<>();
             String fromItem = plainSelect.getFromItem().toString();
+            List<Join> joins = plainSelect.getJoins();
+            boolean hasJoins = joins != null && !joins.isEmpty();
 
-            // Show base table + CTE steps
+            // --- 1. CTE steps (if any) ---
             if (hasCTE && withItems != null) {
-                // Extract base table from the first CTE's inner query
                 WithItem<?> firstCTE = withItems.get(0);
                 ParenthesedSelect pSelect = firstCTE.getSelect();
                 if (pSelect != null) {
@@ -54,29 +55,58 @@ public class QueryService {
                         steps.add(new StepResult("FROM", "SELECT * FROM " + baseTable, executeQuery("SELECT * FROM " + baseTable)));
                     }
                 }
-                // Show each CTE result
                 for (WithItem<?> withItem : withItems) {
                     String cteName = withItem.getAliasName();
                     if (cteName == null) continue;
                     String cteSql = ctePrefix + "SELECT * FROM " + cteName;
                     steps.add(new StepResult("WITH " + cteName, cteSql, executeQuery(cteSql)));
                 }
-            } else {
+            }
+
+            // --- 2. FROM / JOIN steps for the main query ---
+            StringBuilder progressiveFrom = new StringBuilder(fromItem);
+
+            if (hasJoins) {
+                // Show left table (skip if already shown as CTE base)
+                if (!hasCTE) {
+                    steps.add(new StepResult("FROM", "SELECT * FROM " + fromItem, executeQuery("SELECT * FROM " + fromItem)));
+                }
+                // Show each JOIN progressively: JOIN1, JOIN1+JOIN2, ...
+                for (int j = 0; j < joins.size(); j++) {
+                    Join join = joins.get(j);
+                    progressiveFrom.append(" ").append(join);
+
+                    String rightTable = join.getRightItem().toString();
+                    String onCondition = join.getOnExpression() != null ? join.getOnExpression().toString() : "";
+                    TableData rightData = executeQuery(ctePrefix + "SELECT * FROM " + rightTable);
+                    String joinSql = ctePrefix + "SELECT * FROM " + progressiveFrom;
+                    TableData joinData = executeQuery(joinSql);
+                    Map<String, Object> extras = new HashMap<>();
+                    extras.put("rightTableData", rightData);
+                    extras.put("onCondition", onCondition);
+                    extras.put("rightTable", rightTable);
+                    extras.put("leftTable", j == 0 ? fromItem : joins.get(j - 1).getRightItem().toString());
+                    String joinType = join.isLeft() ? "LEFT" : join.isRight() ? "RIGHT" : join.isFull() ? "FULL" : join.isCross() ? "CROSS" : "INNER";
+                    extras.put("joinType", joinType);
+                    steps.add(new StepResult("JOIN " + rightTable, joinSql, joinData, null, extras));
+                }
+            } else if (!hasCTE) {
                 steps.add(new StepResult("FROM", "SELECT * FROM " + fromItem, executeQuery("SELECT * FROM " + fromItem)));
             }
 
-            // Build intermediate queries with CTE prefix
+            // --- 3. Build intermediate-query helpers ---
             String sqlPrefix = ctePrefix;
+            String fromClause = progressiveFrom.toString();
 
             // WHERE
             if (plainSelect.getWhere() != null) {
-                String whereSql = sqlPrefix + "SELECT * FROM " + fromItem + " WHERE " + plainSelect.getWhere();
+                String whereSql = sqlPrefix + "SELECT * FROM " + fromClause + " WHERE " + plainSelect.getWhere();
                 steps.add(new StepResult("WHERE", whereSql, executeQuery(whereSql)));
             }
 
             // GROUP BY
             if (plainSelect.getGroupBy() != null) {
-                String groupSql = sqlPrefix + buildGroupBySql(plainSelect, fromItem);
+                String groupSql = sqlPrefix + buildGroupBySql(plainSelect, fromClause);
                 List<String> groupCols = new ArrayList<>();
                 ExpressionList groupExprList = plainSelect.getGroupBy().getGroupByExpressionList();
                 if (groupExprList != null) {
@@ -89,13 +119,21 @@ public class QueryService {
 
             // HAVING
             if (plainSelect.getHaving() != null) {
-                String havingSql = sqlPrefix + buildHavingSql(plainSelect, fromItem);
+                String havingSql = sqlPrefix + buildHavingSql(plainSelect, fromClause);
                 steps.add(new StepResult("HAVING", havingSql, executeQuery(havingSql)));
             }
 
-            // Final SELECT
-            TableData finalResult = executeQuery(sql);
-            steps.add(new StepResult("SELECT", sql, finalResult));
+            // Final SELECT (with optional DISTINCT decomposition)
+            TableData finalResult;
+            if (plainSelect.getDistinct() != null) {
+                String sqlSelect = sql.replaceFirst("(?i)\\bSELECT\\s+DISTINCT\\b", "SELECT");
+                steps.add(new StepResult("SELECT", sqlSelect, executeQuery(sqlSelect)));
+                finalResult = executeQuery(sql);
+                steps.add(new StepResult("DISTINCT", sql, finalResult));
+            } else {
+                finalResult = executeQuery(sql);
+                steps.add(new StepResult("SELECT", sql, finalResult));
+            }
 
             return new QueryStepResponse(steps, finalResult);
 

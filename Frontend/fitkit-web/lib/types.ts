@@ -9,6 +9,13 @@ export interface StepResult {
   sql: string
   data: TableData
   groupColumns?: string[]
+  extras?: {
+    rightTableData?: TableData
+    onCondition?: string
+    rightTable?: string
+    leftTable?: string
+    joinType?: string
+  }
 }
 
 export interface QueryStepResponse {

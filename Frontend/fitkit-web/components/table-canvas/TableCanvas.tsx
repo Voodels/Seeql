@@ -5,6 +5,8 @@ import { StepTimeline } from "./StepTimeline"
 import { AnimatedTable } from "./AnimatedTable"
 import { GroupAnimation } from "./GroupAnimation"
 import { CteAnimation } from "./CteAnimation"
+import { DistinctAnimation } from "./DistinctAnimation"
+import { JoinAnimation } from "./JoinAnimation"
 import { getClauseBadgeColor } from "@/lib/animation-utils"
 import type { StepResult, TableData } from "@/lib/types"
 
@@ -26,6 +28,8 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
 
   const isGroupStep = step?.clause === "GROUP BY" && !!step?.groupColumns?.length
   const isCteStep = step?.clause?.startsWith("WITH ") ?? false
+  const isDistinctStep = step?.clause === "DISTINCT"
+  const isJoinStep = step?.clause?.startsWith("JOIN ") ?? false
 
   useEffect(() => {
     if (step && onActiveClauseChange) onActiveClauseChange(step.clause)
@@ -51,7 +55,7 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
       setIsPlaying(false)
       return
     }
-    if ((isGroupStep || isCteStep) && !groupAnimComplete) {
+    if ((isGroupStep || isCteStep || isDistinctStep || isJoinStep) && !groupAnimComplete) {
       if (timerRef.current) clearTimeout(timerRef.current)
       return
     }
@@ -121,6 +125,20 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
             currentData={data}
             cteName={step.clause.replace("WITH ", "")}
             cteSql={step.sql}
+            onComplete={handleGroupComplete}
+          />
+        ) : isDistinctStep && previousData ? (
+          <DistinctAnimation
+            key={step.clause}
+            previousData={previousData}
+            currentData={data}
+            onComplete={handleGroupComplete}
+          />
+        ) : isJoinStep && previousData ? (
+          <JoinAnimation
+            key={step.clause}
+            previousData={previousData}
+            step={step}
             onComplete={handleGroupComplete}
           />
         ) : (

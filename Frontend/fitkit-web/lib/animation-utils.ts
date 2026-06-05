@@ -26,10 +26,13 @@ export const CLAUSE_BADGE_COLORS: Record<string, string> = {
   HAVING: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800",
   "ORDER BY": "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800",
   SELECT: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+  DISTINCT: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400 border-rose-200 dark:border-rose-800",
+  JOIN: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200 dark:border-amber-800",
 }
 
 export function getClauseBadgeColor(clause: string): string {
   if (clause.startsWith("WITH ")) return "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800"
+  if (clause.startsWith("JOIN ")) return CLAUSE_BADGE_COLORS["JOIN"]
   return CLAUSE_BADGE_COLORS[clause] || "bg-muted text-muted-foreground border-border"
 }
 
