@@ -1,19 +1,23 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
+import dynamic from "next/dynamic"
 import { StepTimeline } from "./StepTimeline"
-import { GroupAnimation } from "./GroupAnimation"
-import { CteAnimation } from "./CteAnimation"
-import { DistinctAnimation } from "./DistinctAnimation"
-import { JoinAnimation } from "./JoinAnimation"
-import { WhereAnimation } from "./WhereAnimation"
-import { SelectAnimation } from "./SelectAnimation"
-import { OrderByAnimation } from "./OrderByAnimation"
-import { LimitAnimation } from "./LimitAnimation"
-import { TransitionAnimation } from "./TransitionAnimation"
-import { AlertCircle } from "lucide-react"
-import { getClauseBadgeColor } from "@/lib/animation-utils"
+import { AlertCircle, Gauge } from "lucide-react"
+import { getAnimationType } from "@/lib/animation-utils"
+import { useSpeed, getSpeedOptions } from "@/hooks/use-speed"
+import { StepBadge } from "./StepBadge"
 import type { StepResult, TableData } from "@/lib/types"
+
+const GroupAnimation = dynamic(() => import("./GroupAnimation").then((m) => ({ default: m.GroupAnimation })), { ssr: false })
+const CteAnimation = dynamic(() => import("./CteAnimation").then((m) => ({ default: m.CteAnimation })), { ssr: false })
+const DistinctAnimation = dynamic(() => import("./DistinctAnimation").then((m) => ({ default: m.DistinctAnimation })), { ssr: false })
+const JoinAnimation = dynamic(() => import("./JoinAnimation").then((m) => ({ default: m.JoinAnimation })), { ssr: false })
+const WhereAnimation = dynamic(() => import("./WhereAnimation").then((m) => ({ default: m.WhereAnimation })), { ssr: false })
+const SelectAnimation = dynamic(() => import("./SelectAnimation").then((m) => ({ default: m.SelectAnimation })), { ssr: false })
+const OrderByAnimation = dynamic(() => import("./OrderByAnimation").then((m) => ({ default: m.OrderByAnimation })), { ssr: false })
+const LimitAnimation = dynamic(() => import("./LimitAnimation").then((m) => ({ default: m.LimitAnimation })), { ssr: false })
+const TransitionAnimation = dynamic(() => import("./TransitionAnimation").then((m) => ({ default: m.TransitionAnimation })), { ssr: false })
 
 interface TableCanvasProps {
   steps: StepResult[]
@@ -31,15 +35,9 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
   const data = step?.data ?? finalResult
   const previousData = currentStep > 0 ? steps[currentStep - 1]?.data : undefined
 
-  const isGroupStep = step?.clause === "GROUP BY" && !!step?.groupColumns?.length
-  const isCteStep = !!(step?.clause?.startsWith("WITH ") || step?.clause?.startsWith("CTE.WINDOW"))
-  const isDistinctStep = step?.clause === "DISTINCT"
-  const isJoinStep = !!(step?.clause?.includes("JOIN ") || (step?.clause?.startsWith("CTE.") && !step?.clause?.startsWith("CTE.BODY") && !step?.clause?.startsWith("CTE.WHERE") && !step?.clause?.startsWith("CTE.WINDOW") && step?.sql?.includes(" JOIN ")))
-  const isWhereStep = step?.clause === "WHERE" || step?.clause === "CTE.WHERE" || step?.clause === "HAVING"
-  const isSelectStep = step?.clause === "SELECT" || step?.clause === "CTE.BODY"
-  const isOrderByStep = step?.clause === "ORDER BY" || step?.clause?.startsWith("ORDER BY")
-  const isLimitStep = step?.clause === "LIMIT"
-  const hasAnimation = isGroupStep || isCteStep || isDistinctStep || isJoinStep || isWhereStep || isSelectStep || isOrderByStep || isLimitStep
+  const animType = getAnimationType(step)
+  const hasAnimation = animType !== "error"
+  const { speed, setSpeed } = useSpeed()
 
   useEffect(() => {
     if (step && onActiveClauseChange) onActiveClauseChange(step.clause)
@@ -72,9 +70,9 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
     timerRef.current = setTimeout(() => {
       setCurrentStep((prev) => prev + 1)
       setAnimComplete(false)
-    }, 1200)
+    }, 1200 / speed)
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [isPlaying, currentStep, steps.length, hasAnimation, animComplete])
+  }, [isPlaying, currentStep, steps.length, hasAnimation, animComplete, speed])
 
   const togglePlay = useCallback(() => {
     if (currentStep >= steps.length - 1) setCurrentStep(0)
@@ -102,102 +100,58 @@ export function TableCanvas({ steps, finalResult, onActiveClauseChange }: TableC
       />
       <div className="flex-1 overflow-auto">
         {step && (
-          <div className="px-4 pt-3 pb-1 flex items-center gap-2">
-            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getClauseBadgeColor(step.clause)}`}>
-              {step.clause}
-            </span>
-            <code className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded flex-1 truncate font-mono">
-              {step.sql}
-            </code>
-            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-              {step.data.totalRows} rows
-              {previousData && (
-                <span className="ml-1 text-muted-foreground/50">
-                  (was {previousData.totalRows})
-                </span>
-              )}
-            </span>
+          <div className="px-4 pt-3 pb-1 flex items-center gap-4">
+            <StepBadge clause={step.clause} sql={step.sql} totalRows={step.data.totalRows} previousRows={previousData?.totalRows} />
+            <div className="flex items-center gap-1 shrink-0">
+              <Gauge className="size-3 text-muted-foreground/40" />
+              {getSpeedOptions().map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSpeed(s)}
+                  className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded transition-all ${
+                    speed === s
+                      ? "bg-foreground/10 text-foreground"
+                      : "text-muted-foreground/30 hover:text-muted-foreground"
+                  }`}
+                >
+                  {s}x
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
-        {isGroupStep && previousData ? (
-          <GroupAnimation
-            key={step.clause}
-            previousData={previousData}
-            step={step}
-            onComplete={handleAnimComplete}
-          />
-        ) : isCteStep && previousData ? (
-          <CteAnimation
-            key={step.clause}
-            previousData={previousData}
-            currentData={data}
-            cteName={step.clause.replace("WITH ", "")}
-            cteSql={step.sql}
-            onComplete={handleAnimComplete}
-          />
-        ) : isDistinctStep && previousData ? (
-          <DistinctAnimation
-            key={step.clause}
-            previousData={previousData}
-            currentData={data}
-            onComplete={handleAnimComplete}
-          />
-        ) : isJoinStep && previousData ? (
-          <JoinAnimation
-            key={step.clause}
-            previousData={previousData}
-            step={step}
-            onComplete={handleAnimComplete}
-          />
-        ) : isWhereStep && previousData ? (
-          <WhereAnimation
-            key={step.clause}
-            previousData={previousData}
-            step={step}
-            onComplete={handleAnimComplete}
-          />
-        ) : isSelectStep && previousData ? (
-          <SelectAnimation
-            key={step.clause}
-            previousData={previousData}
-            step={step}
-            onComplete={handleAnimComplete}
-          />
-        ) : isOrderByStep && previousData ? (
-          <OrderByAnimation
-            key={step.clause}
-            previousData={previousData}
-            step={step}
-            onComplete={handleAnimComplete}
-          />
-        ) : isLimitStep && previousData ? (
-          <LimitAnimation
-            key={step.clause}
-            previousData={previousData}
-            step={step}
-            onComplete={handleAnimComplete}
-          />
-        ) : step?.extras?.error ? (
+        {animType === "group" && previousData ? (
+          <GroupAnimation key={step.clause} previousData={previousData} step={step} onComplete={handleAnimComplete} />
+        ) : animType === "cte" && previousData ? (
+          <CteAnimation key={step.clause} previousData={previousData} currentData={data} cteName={step.clause.replace("WITH ", "")} cteSql={step.sql} onComplete={handleAnimComplete} />
+        ) : animType === "distinct" && previousData ? (
+          <DistinctAnimation key={step.clause} previousData={previousData} currentData={data} onComplete={handleAnimComplete} />
+        ) : animType === "join" && previousData ? (
+          <JoinAnimation key={step.clause} previousData={previousData} step={step} onComplete={handleAnimComplete} />
+        ) : animType === "where" && previousData ? (
+          <WhereAnimation key={step.clause} previousData={previousData} step={step} onComplete={handleAnimComplete} />
+        ) : animType === "select" && previousData ? (
+          <SelectAnimation key={step.clause} previousData={previousData} step={step} onComplete={handleAnimComplete} />
+        ) : animType === "orderby" && previousData ? (
+          <OrderByAnimation key={step.clause} previousData={previousData} step={step} onComplete={handleAnimComplete} />
+        ) : animType === "limit" && previousData ? (
+          <LimitAnimation key={step.clause} previousData={previousData} step={step} onComplete={handleAnimComplete} />
+        ) : animType === "error" && (step?.error || step?.extras?.error) ? (
           <div className="p-4">
             <div className="flex items-start gap-3 p-4 rounded-lg border border-destructive/30 bg-destructive/5">
               <AlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-destructive">Error</p>
-                <p className="text-xs text-muted-foreground mt-1">{step.extras.error}</p>
-                <code className="text-[10px] block mt-2 font-mono bg-muted p-2 rounded text-muted-foreground">
-                  {step.sql}
-                </code>
+                <p className="text-sm font-semibold text-destructive">
+                  {step.errorType ? `${step.errorType} Error` : "Error"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">{step.error || step.extras?.error}</p>
+                <code className="text-[10px] block mt-2 font-mono bg-muted p-2 rounded text-muted-foreground">{step.sql}</code>
               </div>
             </div>
           </div>
         ) : (
-          <TransitionAnimation
-            key={step.clause}
-            previousData={previousData}
-            step={step}
-            onComplete={handleAnimComplete}
-          />
+          <TransitionAnimation key={step.clause} previousData={previousData} step={step} onComplete={handleAnimComplete} />
         )}
       </div>
     </div>

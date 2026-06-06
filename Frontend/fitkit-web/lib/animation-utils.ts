@@ -1,4 +1,28 @@
-import type { TableData } from "./types"
+import type { StepResult, TableData } from "./types"
+
+export type AnimationType = "group" | "cte" | "distinct" | "join" | "where" | "select" | "orderby" | "limit" | "error" | "transition"
+
+export function getAnimationType(step: StepResult | undefined): AnimationType {
+  if (!step) return "transition"
+  const c = step.clause
+  if (c === "GROUP BY" && step.groupColumns?.length) return "group"
+  if (c.startsWith("WITH ") || c.startsWith("CTE.WINDOW")) return "cte"
+  if (c === "DISTINCT") return "distinct"
+  if (c.includes("JOIN ") || (c.startsWith("CTE.") && !c.startsWith("CTE.BODY") && !c.startsWith("CTE.WHERE") && !c.startsWith("CTE.WINDOW") && step.sql?.includes(" JOIN "))) return "join"
+  if (c === "WHERE" || c === "CTE.WHERE" || c === "HAVING") return "where"
+  if (c === "SELECT" || c === "CTE.BODY") return "select"
+  if (c === "ORDER BY" || c.startsWith("ORDER BY")) return "orderby"
+  if (c === "LIMIT") return "limit"
+  if (step.error || step.extras?.error) return "error"
+  return "transition"
+}
+
+export const MAX_STAGGER_SECONDS = 1.5
+
+export function staggerDelay(i: number, totalRows: number, baseDelay: number = 0.04): number {
+  if (totalRows <= 1) return baseDelay * i
+  return Math.min(baseDelay, MAX_STAGGER_SECONDS / Math.max(totalRows, 1)) * i
+}
 
 export function rowKey(row: Record<string, unknown>, index: number): string {
   if (row.id != null) return String(row.id)
@@ -39,6 +63,27 @@ export function getClauseBadgeColor(clause: string): string {
   if (clause === "UPDATE" || clause === "DELETE") return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800"
   if (clause.startsWith("#")) return "bg-muted text-foreground border-border/50"
   return CLAUSE_BADGE_COLORS[clause] || "bg-muted text-muted-foreground border-border"
+}
+
+/** Assign a deterministic group color based on row values */
+export function getTransitionDescription(clause: string): string {
+  if (clause.startsWith("CTE.")) return `Loading ${clause.replace("CTE.", "")} for CTE scope`
+  if (clause.startsWith("WITH ")) return `Creating CTE: ${clause.replace("WITH ", "")}`
+  if (clause.startsWith("BEFORE")) return "Capturing state before modification"
+  if (clause === "UPDATE") return "Applying updates to matched rows"
+  if (clause === "DELETE") return "Removing rows matching WHERE"
+  if (clause === "INSERT") return "Inserting new rows into table"
+  if (clause === "VALUES") return "Computing values to insert"
+  if (clause.startsWith("SUBQUERY")) return "Executing subquery"
+  if (clause.startsWith("CTE ANCHOR")) return "Building anchor set for recursive CTE"
+  if (clause.startsWith("CTE ITER")) return "Iterating recursive CTE"
+  if (clause === "CREATE") return "Creating table structure"
+  if (clause === "EXPLAIN") return "Showing query execution plan"
+  if (clause === "INTO") return "Writing results to target table"
+  if (clause.startsWith("#") || clause.startsWith("CTE ")) return "Executing compound / misc step"
+  if (clause.startsWith("EXECUTE")) return "Executing query directly"
+  if (clause === "FROM" || clause.startsWith("FROM")) return "Loading base table"
+  return "Processing step"
 }
 
 /** Assign a deterministic group color based on row values */

@@ -28,6 +28,8 @@ export interface StepResult {
   sql: string
   data: TableData
   groupColumns?: string[]
+  error?: string
+  errorType?: string
   extras?: {
     rightTableData?: TableData
     onCondition?: string

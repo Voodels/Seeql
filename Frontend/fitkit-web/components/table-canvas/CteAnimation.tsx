@@ -3,10 +3,11 @@
 import { useMemo } from "react"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
 import { Button } from "@/components/ui/button"
-import { StepForward, StepBack, Play, Square } from "lucide-react"
 import { usePhaseStepper } from "@/hooks/use-phase-stepper"
-import { rowKey, getGroupColor } from "@/lib/animation-utils"
+import { rowKey, getGroupColor, staggerDelay } from "@/lib/animation-utils"
 import type { TableData } from "@/lib/types"
+import { PhaseBar } from "./PhaseBar"
+import { SideBySide } from "./SideBySide"
 
 const ALL_PHASES = [
   { key: "input", label: "Original", desc: "Rows before transformation" },
@@ -66,37 +67,7 @@ export function CteAnimation({ previousData, currentData, cteName, cteSql, onCom
 
   return (
     <div ref={stepper.containerRef} className="flex flex-col items-center gap-4 p-6 min-h-[450px]">
-      <div className="flex items-center gap-3 w-full max-w-5xl">
-        <div className="flex items-center gap-1">
-          <Button size="icon-xs" variant="ghost" onClick={stepper.goPrev} disabled={stepper.isFirst}>
-            <StepBack className="size-3" />
-          </Button>
-          <Button size="icon-xs" variant={stepper.isPlaying ? "destructive" : "default"} onClick={stepper.handleTogglePlay}>
-            {stepper.isPlaying ? <Square className="size-3" /> : <Play className="size-3" />}
-          </Button>
-          <Button size="icon-xs" variant="ghost" onClick={stepper.goNext} disabled={stepper.isLast}>
-            <StepForward className="size-3" />
-          </Button>
-        </div>
-        <div className="flex items-center gap-1.5 flex-1">
-          {phases.map((p, i) => (
-            <button
-              key={p.key}
-              onClick={() => stepper.goTo(i)}
-              className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded transition-all whitespace-nowrap ${
-                i === stepper.phaseIdx
-                  ? "bg-cyan-600 text-white"
-                  : i < stepper.phaseIdx
-                    ? "bg-cyan-100 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400"
-                    : "bg-muted text-muted-foreground/40"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <span className="text-[10px] text-muted-foreground whitespace-nowrap">{phases[stepper.phaseIdx].desc}</span>
-      </div>
+      <PhaseBar phases={phases} phaseIdx={stepper.phaseIdx} isPlaying={stepper.isPlaying} isFirst={stepper.isFirst} isLast={stepper.isLast} onGoPrev={stepper.goPrev} onGoNext={stepper.goNext} onGoTo={(i) => stepper.goTo(i)} onTogglePlay={stepper.handleTogglePlay} />
 
       <div className="text-[10px] font-semibold text-muted-foreground flex items-center gap-2 w-full max-w-5xl">
         <span className={`font-mono ${labelColor}`}>{cteName}</span>
@@ -160,7 +131,7 @@ export function CteAnimation({ previousData, currentData, cteName, cteSql, onCom
                               <motion.span
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
-                                transition={{ delay: i * 0.04 }}
+                                transition={{ delay: staggerDelay(i, previousData.totalRows, 0.04) }}
                                 className="inline-block text-[10px] bg-cyan-50 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400 px-1.5 py-0.5 rounded"
                               >
                                 ?
@@ -224,7 +195,7 @@ export function CteAnimation({ previousData, currentData, cteName, cteSql, onCom
                           key={i}
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
-                          transition={{ delay: i * 0.05 }}
+                          transition={{ delay: staggerDelay(i, currentData.totalRows, 0.05) }}
                           className="border-t border-border/30"
                         >
                           <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
@@ -330,77 +301,7 @@ export function CteAnimation({ previousData, currentData, cteName, cteSql, onCom
               <div className="text-xs font-semibold text-muted-foreground mb-3 tracking-wide text-center">
                 Transformation complete &mdash; <span className={labelColor}>{cteName}</span> ({currentData.totalRows} rows, {currentData.columns.length} columns)
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div>
-                  <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                    <span className="size-2 rounded-full bg-blue-400 shrink-0" />
-                    Before ({previousData.columns.length} cols)
-                  </div>
-                  <div className="rounded-lg border overflow-hidden">
-                    <table className="w-full text-[10px] font-mono">
-                      <thead className="bg-muted/50 text-[9px] font-semibold uppercase tracking-wider">
-                        <tr>
-                          {previousData.columns.map((col) => (
-                            <th key={col} className={`px-2.5 py-1.5 bg-background text-left ${removedColumns.includes(col) ? "text-red-400 line-through" : ""}`}>
-                              {col}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {previousData.rows.slice(0, 5).map((row, i) => (
-                          <tr key={i} className="border-t border-border/30">
-                            {previousData.columns.map((col) => (
-                              <td key={col} className="px-2.5 py-1.5 truncate max-w-[70px]">{String(row[col] ?? "")}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                    <span className="size-2 rounded-full bg-cyan-400 shrink-0" />
-                    After ({currentData.columns.length} cols)
-                  </div>
-                  <div className="rounded-lg border overflow-hidden">
-                    <table className="w-full text-[10px] font-mono">
-                      <thead className="bg-muted/50 text-[9px] font-semibold uppercase tracking-wider">
-                        <tr>
-                          {currentData.columns.map((col) => (
-                            <th key={col} className={`px-2.5 py-1.5 bg-background text-left ${newColumns.includes(col) ? "text-cyan-600" : ""}`}>
-                              {col}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {currentData.rows.slice(0, 5).map((row, i) => (
-                          <motion.tr
-                            key={i}
-                            initial={{ opacity: 0, x: -5 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: i * 0.04 }}
-                            className="border-t border-border/30"
-                          >
-                            {currentData.columns.map((col) => (
-                              <td key={col} className={`px-2.5 py-1.5 truncate max-w-[70px] ${newColumns.includes(col) ? "font-semibold" : ""}`}>
-                                {String(row[col] ?? "")}
-                              </td>
-                            ))}
-                          </motion.tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {previousData.rows.length > 5 && (
-                      <div className="text-[9px] text-muted-foreground px-2.5 py-1 border-t border-border/30">
-                        ... and {previousData.rows.length - 5} more rows
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <SideBySide leftData={previousData} rightData={currentData} leftLabel={`Before (${previousData.columns.length} cols)`} rightLabel={`After (${currentData.columns.length} cols)`} leftColor="bg-blue-400" rightColor="bg-cyan-400" />
               <div className="mt-4 flex justify-center">
                 <Button size="sm" variant="default" onClick={onComplete}>Continue to next step &rarr;</Button>
               </div>

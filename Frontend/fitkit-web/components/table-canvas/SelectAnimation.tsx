@@ -3,10 +3,12 @@
 import { useMemo } from "react"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
 import { Button } from "@/components/ui/button"
-import { StepForward, StepBack, Play, Square, Eye, EyeOff, Plus } from "lucide-react"
+import { Eye, EyeOff, Plus } from "lucide-react"
 import { usePhaseStepper } from "@/hooks/use-phase-stepper"
-import { rowKey } from "@/lib/animation-utils"
+import { staggerDelay } from "@/lib/animation-utils"
 import type { TableData, StepResult } from "@/lib/types"
+import { PhaseBar } from "./PhaseBar"
+import { SideBySide } from "./SideBySide"
 
 const PHASES = [
   { key: "all", label: "All Columns", desc: "All columns before projection" },
@@ -42,37 +44,7 @@ export function SelectAnimation({ previousData, step, onComplete }: SelectAnimat
 
   return (
     <div ref={stepper.containerRef} className="flex flex-col items-center gap-4 p-6 min-h-[450px]">
-      <div className="flex items-center gap-3 w-full max-w-4xl">
-        <div className="flex items-center gap-1">
-          <Button size="icon-xs" variant="ghost" onClick={stepper.goPrev} disabled={stepper.isFirst}>
-            <StepBack className="size-3" />
-          </Button>
-          <Button size="icon-xs" variant={stepper.isPlaying ? "destructive" : "default"} onClick={stepper.handleTogglePlay}>
-            {stepper.isPlaying ? <Square className="size-3" /> : <Play className="size-3" />}
-          </Button>
-          <Button size="icon-xs" variant="ghost" onClick={stepper.goNext} disabled={stepper.isLast}>
-            <StepForward className="size-3" />
-          </Button>
-        </div>
-        <div className="flex items-center gap-1.5 flex-1">
-          {PHASES.map((p, i) => (
-            <button
-              key={p.key}
-              onClick={() => stepper.goTo(i)}
-              className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded transition-all whitespace-nowrap ${
-                i === stepper.phaseIdx
-                  ? "bg-indigo-600 text-white"
-                  : i < stepper.phaseIdx
-                    ? "bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
-                    : "bg-muted text-muted-foreground/40"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <span className="text-[10px] text-muted-foreground whitespace-nowrap">{PHASES[stepper.phaseIdx].desc}</span>
-      </div>
+      <PhaseBar phases={PHASES} phaseIdx={stepper.phaseIdx} isPlaying={stepper.isPlaying} isFirst={stepper.isFirst} isLast={stepper.isLast} onGoPrev={stepper.goPrev} onGoNext={stepper.goNext} onGoTo={(i) => stepper.goTo(i)} onTogglePlay={stepper.handleTogglePlay} />
 
       <LayoutGroup>
         <AnimatePresence mode="popLayout">
@@ -164,7 +136,7 @@ export function SelectAnimation({ previousData, step, onComplete }: SelectAnimat
                               <motion.span
                                 initial={{ opacity: 0, scale: 0.5 }}
                                 animate={{ opacity: 1, scale: 1 }}
-                                transition={{ delay: i * 0.04 }}
+                                transition={{ delay: staggerDelay(i, previousData.totalRows, 0.04) }}
                                 className="inline-block px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold"
                               >
                                 {String(val ?? "")}
@@ -233,7 +205,7 @@ export function SelectAnimation({ previousData, step, onComplete }: SelectAnimat
                         key={col}
                         initial={{ opacity: 0, scale: 0.8 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: i * 0.05 }}
+                        transition={{ delay: staggerDelay(i, previousData.totalRows, 0.05) }}
                         className="bg-background rounded px-2.5 py-1.5 text-[10px] font-mono border border-indigo-200 dark:border-indigo-800"
                       >
                         <span className="font-semibold text-indigo-600 dark:text-indigo-400">{col}</span>
@@ -268,7 +240,7 @@ export function SelectAnimation({ previousData, step, onComplete }: SelectAnimat
                         key={col}
                         initial={{ opacity: 0, scale: 0.8 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: i * 0.05 }}
+                        transition={{ delay: staggerDelay(i, previousData.totalRows, 0.05) }}
                         className="bg-background/60 rounded px-2.5 py-1.5 text-[10px] font-mono border border-red-200 dark:border-red-800"
                       >
                         <span className="line-through text-red-400">{col}</span>
@@ -320,79 +292,7 @@ export function SelectAnimation({ previousData, step, onComplete }: SelectAnimat
             <div className="text-xs font-semibold text-muted-foreground mb-3 tracking-wide text-center">
               SELECT complete &mdash; {resultData.columns.length} columns, {resultData.totalRows} rows
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div>
-                <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-blue-400 shrink-0" />
-                  Before ({previousData.columns.length} cols)
-                </div>
-                <div className="rounded-lg border overflow-hidden">
-                  <table className="w-full text-[10px] font-mono">
-                    <thead className="bg-muted/50 text-[9px] font-semibold uppercase tracking-wider">
-                      <tr>
-                        {previousData.columns.map((col) => (
-                          <th key={col} className={`px-2.5 py-1.5 bg-background text-left ${droppedColumns.includes(col) ? "text-red-400 line-through" : ""}`}>
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previousData.rows.slice(0, 5).map((row, i) => (
-                        <tr key={i} className="border-t border-border/30">
-                          {previousData.columns.map((col) => (
-                            <td key={col} className={`px-2.5 py-1.5 truncate max-w-[80px] ${droppedColumns.includes(col) ? "text-red-300 line-through" : ""}`}>
-                              {String(row[col] ?? "")}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {previousData.rows.length > 5 && (
-                    <div className="text-[9px] text-muted-foreground px-2.5 py-1 border-t border-border/30">
-                      ... and {previousData.rows.length - 5} more rows
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                  <span className="size-2 rounded-full bg-indigo-400 shrink-0" />
-                  After &mdash; projected ({resultData.columns.length} cols)
-                </div>
-                <div className="rounded-lg border overflow-hidden">
-                  <table className="w-full text-[10px] font-mono">
-                    <thead className="bg-muted/50 text-[9px] font-semibold uppercase tracking-wider">
-                      <tr>
-                        {resultData.columns.map((col) => (
-                          <th key={col} className={`px-2.5 py-1.5 bg-background text-left ${newColumns.includes(col) ? "text-emerald-600" : "text-indigo-600"}`}>
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {resultData.rows.map((row, i) => (
-                        <motion.tr
-                          key={i}
-                          initial={{ opacity: 0, x: -5 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.04 }}
-                          className="border-t border-border/30"
-                        >
-                          {resultData.columns.map((col) => (
-                            <td key={col} className="px-2.5 py-1.5 truncate max-w-[80px] font-semibold">
-                              {String(row[col] ?? "")}
-                            </td>
-                          ))}
-                        </motion.tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+            <SideBySide leftData={previousData} rightData={resultData} leftLabel={`Before (${previousData.columns.length} cols)`} rightLabel={`After — projected (${resultData.columns.length} cols)`} leftColor="bg-blue-400" rightColor="bg-indigo-400" />
             <div className="mt-4 flex justify-center">
               <Button size="sm" variant="default" onClick={onComplete}>Continue to next step &rarr;</Button>
             </div>

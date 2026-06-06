@@ -3,10 +3,10 @@
 import { useMemo } from "react"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
 import { Button } from "@/components/ui/button"
-import { StepForward, StepBack, Play, Square } from "lucide-react"
 import { usePhaseStepper } from "@/hooks/use-phase-stepper"
-import { rowKey, getGroupColor } from "@/lib/animation-utils"
+import { rowKey, getGroupColor, staggerDelay } from "@/lib/animation-utils"
 import type { StepResult } from "@/lib/types"
+import { PhaseBar } from "./PhaseBar"
 
 const PHASES = [
   { key: "left", label: "Left Table", desc: "Rows from the left table" },
@@ -97,37 +97,7 @@ export function JoinAnimation({ previousData, step, onComplete }: JoinAnimationP
 
   return (
     <div ref={stepper.containerRef} className="flex flex-col items-center gap-4 p-6 min-h-[450px]">
-      <div className="flex items-center gap-3 w-full max-w-5xl">
-        <div className="flex items-center gap-1">
-          <Button size="icon-xs" variant="ghost" onClick={stepper.goPrev} disabled={stepper.isFirst}>
-            <StepBack className="size-3" />
-          </Button>
-          <Button size="icon-xs" variant={stepper.isPlaying ? "destructive" : "default"} onClick={stepper.handleTogglePlay}>
-            {stepper.isPlaying ? <Square className="size-3" /> : <Play className="size-3" />}
-          </Button>
-          <Button size="icon-xs" variant="ghost" onClick={stepper.goNext} disabled={stepper.isLast}>
-            <StepForward className="size-3" />
-          </Button>
-        </div>
-        <div className="flex items-center gap-1.5 flex-1">
-          {PHASES.map((p, i) => (
-            <button
-              key={p.key}
-              onClick={() => stepper.goTo(i)}
-              className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded transition-all whitespace-nowrap ${
-                i === stepper.phaseIdx
-                  ? "bg-amber-600 text-white"
-                  : i < stepper.phaseIdx
-                    ? "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
-                    : "bg-muted text-muted-foreground/40"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <span className="text-[10px] text-muted-foreground whitespace-nowrap">{PHASES[stepper.phaseIdx].desc}</span>
-      </div>
+      <PhaseBar phases={PHASES} phaseIdx={stepper.phaseIdx} isPlaying={stepper.isPlaying} isFirst={stepper.isFirst} isLast={stepper.isLast} onGoPrev={stepper.goPrev} onGoNext={stepper.goNext} onGoTo={(i) => stepper.goTo(i)} onTogglePlay={stepper.handleTogglePlay} />
 
       <div className="w-full text-center text-[11px] font-mono text-muted-foreground bg-muted/30 px-3 py-1.5 rounded-lg border max-w-5xl">
         <span className="font-bold">ON</span> {onCondition}
@@ -149,7 +119,7 @@ export function JoinAnimation({ previousData, step, onComplete }: JoinAnimationP
                     layout
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: i * 0.03 }}
+                    transition={{ duration: 0.3, delay: staggerDelay(i, previousData.totalRows, 0.03) }}
                     className="flex items-center gap-3 px-4 py-2 rounded border bg-card text-xs font-mono"
                   >
                     <span className="text-muted-foreground w-5 shrink-0">{i + 1}</span>
@@ -182,7 +152,7 @@ export function JoinAnimation({ previousData, step, onComplete }: JoinAnimationP
                         x: 0,
                         backgroundColor: hasMatch ? "rgba(34,197,94,0.06)" : "transparent",
                       }}
-                      transition={{ duration: 0.3, delay: i * 0.03 }}
+                      transition={{ duration: 0.3, delay: staggerDelay(i, rightData.totalRows, 0.03) }}
                       className="flex items-center gap-3 px-4 py-2 rounded border bg-card text-xs font-mono"
                       style={{
                         borderLeftWidth: 3,
@@ -317,7 +287,7 @@ export function JoinAnimation({ previousData, step, onComplete }: JoinAnimationP
                           key={`pair-${i}`}
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.04 }}
+                          transition={{ delay: staggerDelay(i, resultData.totalRows, 0.04) }}
                           className="flex items-center gap-2 px-3 py-1.5 rounded border bg-card text-[10px] font-mono"
                           style={{ borderLeftWidth: 3, borderLeftColor: color.border.replace("border-", "") }}
                         >
@@ -371,7 +341,7 @@ export function JoinAnimation({ previousData, step, onComplete }: JoinAnimationP
                         key={i}
                         initial={{ opacity: 0, x: -5 }}
                         animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.03 }}
+                        transition={{ delay: staggerDelay(i, resultData.totalRows, 0.03) }}
                         className="border-t border-border/30"
                         style={color ? {
                           backgroundColor: `${color.bg.replace("bg-", "").replace(" dark:", "")}08` as string,

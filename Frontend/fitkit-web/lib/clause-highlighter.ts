@@ -7,13 +7,11 @@ export interface ClauseLocation {
 export function findClauses(sql: string): ClauseLocation[] {
   const clauses: ClauseLocation[] = []
 
-  // 1. Find CTE body paren ranges to exclude clauses inside CTE definitions
   const cteBodyRanges = findCteBodyRanges(sql)
   function isInsideCteBody(pos: number): boolean {
     return cteBodyRanges.some((r) => pos >= r.start && pos < r.end)
   }
 
-  // 2. Standard SQL clauses — skip those inside CTE bodies
   const re = /\b(SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|(?:LEFT|RIGHT|INNER|FULL|CROSS|NATURAL|LATERAL)?\s*JOIN)\b/gi
   let match: RegExpExecArray | null
   while ((match = re.exec(sql)) !== null) {
@@ -26,7 +24,6 @@ export function findClauses(sql: string): ClauseLocation[] {
     }
   }
 
-  // 3. CTE name clauses (always included — they are the CTE definitions themselves)
   const cteRe = /(?:\bWITH\s+|\)\s*,\s*)(\w+)\s+AS\s*\(/gi
   while ((match = cteRe.exec(sql)) !== null) {
     const cteName = match[1].toUpperCase()
@@ -41,6 +38,19 @@ export function findClauses(sql: string): ClauseLocation[] {
   return clauses.sort((a, b) => a.start - b.start)
 }
 
+function normalizeActiveClause(clause: string): string {
+  const upper = clause.toUpperCase().trim()
+  let n = upper.replace(/^#\d+\s+/, "")
+  if (n.startsWith("CTE.")) n = n.slice(4).trim()
+  if (n === "BODY") return "SELECT"
+  for (const kw of ["ORDER BY", "GROUP BY", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN", "CROSS JOIN", "NATURAL JOIN", "LATERAL JOIN", "DISTINCT", "LIMIT", "HAVING", "WHERE", "SELECT", "FROM", "JOIN"]) {
+    if (n.startsWith(kw) || n.includes(` ${kw}`)) return kw
+  }
+  if (n.startsWith("WITH ")) return "WITH"
+  if (/^SELECT\s+\d+$/.test(n)) return "SELECT"
+  return n
+}
+
 export function findClauseSpans(
   sql: string,
   activeClause: string
@@ -50,27 +60,10 @@ export function findClauseSpans(
   const clauses = findClauses(sql)
   if (clauses.length === 0) return [{ text: sql, highlight: false }]
 
+  const activeKeyword = normalizeActiveClause(activeClause)
+
   const spans: { text: string; highlight: boolean }[] = []
   let cursor = 0
-
-  const clauseMap: Record<string, string[]> = {
-    SELECT: ["SELECT"],
-    FROM: ["FROM"],
-    WHERE: ["WHERE"],
-    "GROUP BY": ["GROUP BY"],
-    HAVING: ["HAVING"],
-    "ORDER BY": ["ORDER BY"],
-    DISTINCT: ["DISTINCT"],
-    JOIN: ["JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN", "CROSS JOIN", "LATERAL JOIN"],
-    LIMIT: ["LIMIT"],
-  }
-
-  const upper = activeClause.toUpperCase()
-  const activeKeywords = clauseMap[activeClause] || (
-    upper.startsWith("WITH ") || upper.includes("JOIN ") || upper.startsWith("CTE ") || upper.startsWith("CTE.")
-      ? [activeClause]
-      : [activeClause, activeClause.split(" ")[0]]
-  )
 
   for (let i = 0; i < clauses.length; i++) {
     const clause = clauses[i]
@@ -78,11 +71,10 @@ export function findClauseSpans(
       spans.push({ text: sql.slice(cursor, clause.start), highlight: false })
     }
 
-    const isActive = activeKeywords.some((kw) => {
-      const upperClause = clause.keyword.toUpperCase()
-      const upperKw = kw.toUpperCase()
-      return upperClause === upperKw || upperClause.startsWith(upperKw) || upperClause.endsWith(upperKw)
-    })
+    const clauseUpper = clause.keyword.toUpperCase()
+    const isActive = clauseUpper === activeKeyword
+      || clauseUpper.startsWith(activeKeyword + " ")
+      || (activeKeyword.startsWith("WITH") && clauseUpper.startsWith("WITH"))
 
     const nextClause = clauses[i + 1]
     const clauseEnd = nextClause ? nextClause.start : sql.length

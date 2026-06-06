@@ -39,7 +39,21 @@ public class QueryService {
         log.info("executeStepwise called with SQL: {}", sql);
         sql = fixMySqlCompatibility(sql);
         try {
-            List<Statement> statements = CCJSqlParserUtil.parseStatements(sql);
+            List<Statement> statements;
+            try {
+                statements = CCJSqlParserUtil.parseStatements(sql);
+            } catch (Exception e) {
+                log.warn("parseStatements failed ({}), falling back to parse()", e.getMessage());
+                statements = null;
+            }
+            if (statements == null) {
+                Statement single = CCJSqlParserUtil.parse(sql);
+                statements = List.of(single);
+            }
+            if (statements.isEmpty()) {
+                Statement single = CCJSqlParserUtil.parse(sql);
+                statements = List.of(single);
+            }
             if (statements.size() > 1) {
                 return handleCompoundStatements(statements);
             }

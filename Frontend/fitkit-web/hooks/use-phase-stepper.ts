@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
+import { useSpeed } from "./use-speed"
 
 export interface PhaseConfig {
   key: string
@@ -12,9 +13,12 @@ interface PhaseStepperOptions {
   phases: PhaseConfig[]
   autoAdvanceMs?: number
   onComplete?: () => void
+  speedMultiplier?: number
 }
 
-export function usePhaseStepper({ phases, autoAdvanceMs = 1800, onComplete }: PhaseStepperOptions) {
+export function usePhaseStepper({ phases, autoAdvanceMs = 1800, onComplete, speedMultiplier }: PhaseStepperOptions) {
+  const { multiplier: ctxMultiplier } = useSpeed()
+  const effectiveMs = autoAdvanceMs / (speedMultiplier ?? ctxMultiplier)
   const [phaseIdx, setPhaseIdx] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -48,10 +52,10 @@ export function usePhaseStepper({ phases, autoAdvanceMs = 1800, onComplete }: Ph
         onComplete?.()
         return
       }
-      const t = setTimeout(() => goNext(), autoAdvanceMs)
+      const t = setTimeout(() => goNext(), effectiveMs)
       return () => clearTimeout(t)
     }
-  }, [isPlaying, safeIdx, phases.length, autoAdvanceMs, goNext, onComplete])
+  }, [isPlaying, safeIdx, phases.length, effectiveMs, goNext, onComplete])
 
   useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
